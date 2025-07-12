@@ -511,6 +511,12 @@ mrb_struct_equal(mrb_state *mrb, mrb_value s)
   if (RSTRUCT_LEN(s) != RSTRUCT_LEN(s2)) {
     return mrb_false_value();
   }
+
+  /* Check for recursion */
+  if (MRB_RECURSIVE_BINARY_P(mrb, MRB_OPSYM(eq), s, s2)) {
+    return mrb_false_value();
+  }
+
   mrb_value *ptr = RSTRUCT_PTR(s);
   mrb_value *ptr2 = RSTRUCT_PTR(s2);
   mrb_int len = RSTRUCT_LEN(s);
@@ -549,6 +555,12 @@ mrb_struct_eql(mrb_state *mrb, mrb_value s)
   if (RSTRUCT_LEN(s) != RSTRUCT_LEN(s2)) {
     return mrb_false_value();
   }
+
+  /* Check for recursion */
+  if (MRB_RECURSIVE_BINARY_P(mrb, MRB_SYM_Q(eql), s, s2)) {
+    return mrb_false_value();
+  }
+
   ptr = RSTRUCT_PTR(s);
   ptr2 = RSTRUCT_PTR(s2);
   len = RSTRUCT_LEN(s);
@@ -635,7 +647,7 @@ mrb_struct_to_s(mrb_state *mrb, mrb_value self)
     mrb_str_cat_str(mrb, ret, cname);
     mrb_str_cat_lit(mrb, ret, " ");
   }
-  if (mrb_inspect_recursive_p(mrb, self)) {
+  if (MRB_RECURSIVE_UNARY_P(mrb, MRB_SYM(inspect), self)) {
     mrb_str_cat_lit(mrb, ret, "...>");
     return ret;
   }

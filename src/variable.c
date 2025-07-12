@@ -78,6 +78,8 @@ bsearch_idx(mrb_sym *keys, int size, mrb_sym target) {
   /* While more than one element remains, halve the range each iteration */
   while (n > 1) {
     int half = n >> 1;
+    MRB_MEM_PREFETCH(p + (half >> 1));
+    MRB_MEM_PREFETCH(p + half + (half >> 1));
     mrb_sym mid_sym = p[half];
     /*
      * Update pointer p without a branch:
@@ -634,7 +636,7 @@ mrb_obj_iv_inspect(mrb_state *mrb, struct RObject *obj)
     mrb_str_cat_lit(mrb, str, ":");
     mrb_str_cat_str(mrb, str, mrb_ptr_to_str(mrb, obj));
 
-    if (mrb_inspect_recursive_p(mrb, mrb_obj_value(obj))) {
+    if (MRB_RECURSIVE_UNARY_P(mrb, MRB_SYM(inspect), mrb_obj_value(obj))) {
       mrb_str_cat_lit(mrb, str, " ...>");
       return str;
     }
