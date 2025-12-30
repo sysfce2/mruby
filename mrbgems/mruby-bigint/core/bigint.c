@@ -219,8 +219,9 @@ mpz_set_int(mpz_ctx_t *ctx, mpz_t *y, mrb_int v)
   mrb_uint u;
 
   if (v == 0) {
-    y->sn=0;
-    u = 0;
+    y->sn = 0;
+    y->sz = 0;
+    return;
   }
   else if (v > 0) {
     y->sn = 1;
@@ -236,11 +237,13 @@ mpz_set_int(mpz_ctx_t *ctx, mpz_t *y, mrb_int v)
     mpz_realloc(ctx, y, 2);
     y->p[1] = (mp_limb)HIGH(u);
     y->p[0] = (mp_limb)LOW(u);
+    y->sz = 2;
     return;
   }
 #endif
   mpz_realloc(ctx, y, 1);
   y->p[0] = (mp_limb)u;
+  y->sz = 1;
 }
 
 
@@ -253,6 +256,7 @@ mpz_set_uint64(mpz_ctx_t *ctx, mpz_t *y, uint64_t u)
     ;
   y->sn = (u != 0);
   mpz_realloc(ctx, y, len);
+  y->sz = len;
   for (size_t i=0; i<len; i++) {
     y->p[i] = (mp_limb)LOW(u);
     u >>= DIG_SIZE;
@@ -1650,7 +1654,10 @@ mpz_mod_limb(mpz_ctx_t *ctx, mpz_t *r, mpz_t *x, mp_limb m)
     /* Single limb case - simple modulo */
     mp_limb result = x->p[0] % m;
     mpz_set_int(ctx, r, result);
-    r->sn = x->sn;
+    if (result == 0)
+      r->sn = 0;
+    else
+      r->sn = x->sn;
     return;
   }
 
@@ -2071,7 +2078,10 @@ mpz_mul_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e)
     else {
       mpz_move(ctx, z, &y);
     }
-    z->sn = sn;
+    if (uzero_p(z))
+      z->sn = 0;
+    else
+      z->sn = sn;
   }
 }
 
@@ -2080,18 +2090,27 @@ mpz_div_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e)
 {
   short sn = x->sn;
   if (e == 0) {
-    mpz_init_heap(ctx, z, x->sz);
-    mpz_set(ctx, z, x);
+    if (z != x) {
+      mpz_init_heap(ctx, z, x->sz);
+      mpz_set(ctx, z, x);
+    }
+    /* else: z == x, nothing to do */
   }
   else {
     size_t digs = e / DIG_SIZE;
     size_t bs = e % DIG_SIZE;
-    mpz_t y;
 
-    size_t new_size = (digs >= x->sz) ? 1 : x->sz - digs;
+    /* If shifting by more limbs than we have, result is zero */
+    if (digs >= x->sz) {
+      zero(z);
+      return;
+    }
+
+    mpz_t y;
+    size_t new_size = x->sz - digs;
     mpz_init_temp(ctx, &y, new_size);
     mpz_realloc(ctx, &y, new_size);
-    for (size_t i = 0; i < x->sz - digs; i++)
+    for (size_t i = 0; i < new_size; i++)
       y.p[i] = x->p[i + digs];
     if (bs) {
       mpz_init_heap(ctx, z, new_size);
@@ -2633,8 +2652,10 @@ mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
     goto cleanup;
   }
 
-  mpz_init_set(ctx, &a, aa);
-  mpz_init_set(ctx, &b, bb);
+  mpz_init(ctx, &a);
+  mpz_abs(ctx, &a, aa);
+  mpz_init(ctx, &b);
+  mpz_abs(ctx, &b, bb);
 
   shift = 0;
   a_zeros = mpz_trailing_zeros(&a);
@@ -3421,12 +3442,17 @@ mrb_value
 mrb_bint_powm(mrb_state *mrb, mrb_value x, mrb_value exp, mrb_value mod)
 {
   mpz_t a, b, c, z;
+  mrb_bool neg_mod = FALSE;
   MPZ_CTX_INIT(mrb, ctx, pool);
 
   bint_as_mpz(RBIGINT(x), &a);
   if (mrb_integer_p(mod)) {
     mrb_int m = mrb_integer(mod);
     if (m == 0) mrb_int_zerodiv(mrb);
+    if (m < 0) {
+      neg_mod = TRUE;
+      m = -m;
+    }
     mpz_init_set_int(ctx, &c, m);
   }
   else {
@@ -3435,7 +3461,29 @@ mrb_bint_powm(mrb_state *mrb, mrb_value x, mrb_value exp, mrb_value mod)
     if (zero_p(&c) || uzero_p(&c)) {
       mrb_int_zerodiv(mrb);
     }
+    if (c.sn < 0) {
+      neg_mod = TRUE;
+      c.sn = 1;  /* use absolute value */
+    }
   }
+
+  /* Check for zero base case: 0^n = 0 for n > 0 */
+  if (zero_p(&a) || uzero_p(&a)) {
+    mrb_bool exp_positive;
+    if (mrb_bigint_p(exp)) {
+      bint_as_mpz(RBIGINT(exp), &b);
+      exp_positive = (b.sn > 0) && !uzero_p(&b);
+    }
+    else {
+      exp_positive = mrb_integer(exp) > 0;
+    }
+    if (exp_positive) {
+      /* 0^n mod m = 0 for n > 0 */
+      if (mrb_integer_p(mod)) mpz_clear(ctx, &c);
+      return mrb_fixnum_value(0);
+    }
+  }
+
   mpz_init(ctx, &z);
   if (mrb_bigint_p(exp)) {
     bint_as_mpz(RBIGINT(exp), &b);
@@ -3447,6 +3495,13 @@ mrb_bint_powm(mrb_state *mrb, mrb_value x, mrb_value exp, mrb_value mod)
     if (e < 0) goto raise;
     mpz_powm_i(ctx, &z, &a, e, &c);
   }
+
+  /* Apply signed modulo adjustment for negative modulus */
+  /* Ruby: result + m for non-zero result when m is negative */
+  if (neg_mod && !zero_p(&z) && !uzero_p(&z)) {
+    mpz_sub(ctx, &z, &z, &c);  /* z = z - |m| = z + m (since m is negative) */
+  }
+
   if (mrb_integer_p(mod)) mpz_clear(ctx, &c);
   return bint_norm(mrb, bint_new(ctx, &z));
 
