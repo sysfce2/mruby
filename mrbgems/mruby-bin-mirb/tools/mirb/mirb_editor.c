@@ -154,6 +154,66 @@ calc_indent_level(const char *code)
 }
 
 /*
+ * Calculate expected indent level for the given line index.
+ * Uses code up to line_idx-1 to determine nesting depth.
+ */
+static int
+calc_expected_indent(mirb_buffer *buf, size_t line_idx)
+{
+  int indent = 0;
+  char *partial;
+
+  if (line_idx == 0) return 0;
+  partial = mirb_buffer_to_string_upto_line(buf, line_idx - 1);
+  if (partial) {
+    indent = calc_indent_level(partial);
+    free(partial);
+  }
+  return indent;
+}
+
+/*
+ * Adjust current line's leading whitespace to target_spaces.
+ * Preserves cursor position relative to line content.
+ */
+static void
+adjust_line_indent(mirb_buffer *buf, size_t target_spaces)
+{
+  size_t current_spaces = leading_spaces(mirb_buffer_current_line(buf));
+  size_t saved_col = buf->cursor_col;
+
+  if (target_spaces == current_spaces) return;
+
+  if (target_spaces > current_spaces) {
+    size_t add = target_spaces - current_spaces;
+    buf->cursor_col = 0;
+    for (size_t i = 0; i < add; i++) {
+      mirb_buffer_insert_char(buf, ' ');
+    }
+    buf->cursor_col = saved_col + add;
+  }
+  else {
+    size_t to_remove = current_spaces - target_spaces;
+    buf->cursor_col = 0;
+    for (size_t i = 0; i < to_remove; i++) {
+      mirb_buffer_delete_forward(buf);
+    }
+    buf->cursor_col = (saved_col > to_remove) ? (saved_col - to_remove) : 0;
+  }
+}
+
+/*
+ * Insert indent spaces at cursor position
+ */
+static void
+insert_indent_spaces(mirb_buffer *buf, int indent_level)
+{
+  for (int i = 0; i < indent_level * 2; i++) {
+    mirb_buffer_insert_char(buf, ' ');
+  }
+}
+
+/*
  * Check if we should dedent after typing a character
  * Returns TRUE if current line starts with 'end' or '}' after only whitespace
  */
@@ -212,41 +272,14 @@ should_dedent(mirb_buffer *buf, char last_char)
 }
 
 /*
- * Perform dedentation - remove one level (2 spaces) of leading whitespace
+ * Perform dedentation - adjust indent for dedent keyword
  */
 static void
 perform_dedent(mirb_buffer *buf)
 {
-  const char *line = mirb_buffer_current_line(buf);
-  size_t current_spaces = leading_spaces(line);
-  int expected_indent = 0;
-
-  /* Calculate expected indent from code up to previous line */
-  if (buf->cursor_line > 0) {
-    char *partial = mirb_buffer_to_string_upto_line(buf, buf->cursor_line - 1);
-    if (partial) {
-      expected_indent = calc_indent_level(partial);
-      free(partial);
-    }
-  }
-
-  /* Dedent one level for keywords like end, else, etc. */
-  if (expected_indent > 0) expected_indent--;
-
-  size_t target_spaces = (size_t)(expected_indent * 2);
-
-  /* Only dedent if we have more spaces than target */
-  if (current_spaces > target_spaces) {
-    size_t to_remove = current_spaces - target_spaces;
-    size_t saved_col = buf->cursor_col;
-    /* Move cursor to start of line and delete leading spaces */
-    buf->cursor_col = 0;
-    for (size_t i = 0; i < to_remove; i++) {
-      mirb_buffer_delete_forward(buf);
-    }
-    /* Restore cursor position, adjusted for removed spaces */
-    buf->cursor_col = (saved_col > to_remove) ? (saved_col - to_remove) : 0;
-  }
+  int indent = calc_expected_indent(buf, buf->cursor_line);
+  if (indent > 0) indent--;
+  adjust_line_indent(buf, (size_t)(indent * 2));
 }
 
 
@@ -258,55 +291,12 @@ static void
 reindent_line(mirb_buffer *buf)
 {
   mirb_line *line = &buf->lines[buf->cursor_line];
-  size_t current_spaces = 0;
-  int expected_indent = 0;
-  const char *content;
-
-  /* Count current leading whitespace */
-  for (size_t i = 0; i < line->len && (line->data[i] == ' ' || line->data[i] == '\t'); i++) {
-    current_spaces++;
-  }
-
-  /* Calculate expected indent from code up to previous line */
-  if (buf->cursor_line > 0) {
-    char *partial = mirb_buffer_to_string_upto_line(buf, buf->cursor_line - 1);
-    if (partial) {
-      expected_indent = calc_indent_level(partial);
-      free(partial);
-    }
-  }
-
-  /* Check if line content starts with dedenting keyword */
-  content = line->data + current_spaces;
+  int indent = calc_expected_indent(buf, buf->cursor_line);
+  const char *content = line->data + leading_spaces(line->data);
   if (is_dedent_keyword(content)) {
-    if (expected_indent > 0) expected_indent--;
+    if (indent > 0) indent--;
   }
-
-  size_t target_spaces = (size_t)(expected_indent * 2);
-
-  /* Adjust indentation if needed */
-  if (target_spaces != current_spaces) {
-    size_t saved_col = buf->cursor_col;
-
-    if (target_spaces > current_spaces) {
-      /* Need to add spaces */
-      size_t add = target_spaces - current_spaces;
-      buf->cursor_col = 0;
-      for (size_t i = 0; i < add; i++) {
-        mirb_buffer_insert_char(buf, ' ');
-      }
-      buf->cursor_col = saved_col + add;
-    }
-    else {
-      /* Need to remove spaces */
-      size_t remove = current_spaces - target_spaces;
-      buf->cursor_col = current_spaces;
-      for (size_t i = 0; i < remove; i++) {
-        mirb_buffer_delete_back(buf);
-      }
-      buf->cursor_col = (saved_col > remove) ? (saved_col - remove) : 0;
-    }
-  }
+  adjust_line_indent(buf, (size_t)(indent * 2));
 }
 
 /*
@@ -425,67 +415,7 @@ mirb_editor_set_tab_complete(mirb_editor *ed,
 static void
 handle_tab_indent(mirb_editor *ed)
 {
-  mirb_line *line = &ed->buf.lines[ed->buf.cursor_line];
-  int expected_indent = 0;
-  size_t current_spaces = 0;
-  size_t i;
-  const char *content;
-  size_t saved_cursor_col = ed->buf.cursor_col;
-
-  /* Calculate expected indent from code up to previous line */
-  if (ed->buf.cursor_line > 0) {
-    char *partial = mirb_buffer_to_string_upto_line(&ed->buf, ed->buf.cursor_line - 1);
-    if (partial) {
-      expected_indent = calc_indent_level(partial);
-      free(partial);
-    }
-  }
-
-  /* Count current leading whitespace */
-  for (i = 0; i < line->len && (line->data[i] == ' ' || line->data[i] == '\t'); i++) {
-    current_spaces++;
-  }
-
-  /* Check if line content starts with dedenting keyword */
-  content = line->data + current_spaces;
-  if (is_dedent_keyword(content)) {
-    if (expected_indent > 0) expected_indent--;
-  }
-
-  /* Calculate target spaces (2 spaces per indent level) */
-  size_t target_spaces = (size_t)(expected_indent * 2);
-
-  /* Adjust indentation */
-  if (target_spaces > current_spaces) {
-    /* Need to add spaces - insert at beginning */
-    size_t add = target_spaces - current_spaces;
-    ed->buf.cursor_col = 0;
-    for (i = 0; i < add; i++) {
-      mirb_buffer_insert_char(&ed->buf, ' ');
-    }
-  }
-  else if (target_spaces < current_spaces) {
-    /* Need to remove spaces */
-    size_t remove = current_spaces - target_spaces;
-    ed->buf.cursor_col = current_spaces;
-    for (i = 0; i < remove; i++) {
-      mirb_buffer_delete_back(&ed->buf);
-    }
-  }
-
-  /* Restore cursor position adjusted for indent change */
-  if (target_spaces >= current_spaces) {
-    ed->buf.cursor_col = saved_cursor_col + (target_spaces - current_spaces);
-  }
-  else {
-    size_t removed = current_spaces - target_spaces;
-    if (saved_cursor_col >= removed) {
-      ed->buf.cursor_col = saved_cursor_col - removed;
-    }
-    else {
-      ed->buf.cursor_col = 0;
-    }
-  }
+  reindent_line(&ed->buf);
 }
 
 static mrb_bool
@@ -725,19 +655,14 @@ handle_key(mirb_editor *ed, int key, mirb_edit_result *result)
           mirb_line *next_line = &ed->buf.lines[next_line_idx];
           if (is_line_blank(next_line)) {
             /* Move to existing blank last line with proper indentation */
-            char *code = mirb_buffer_to_string(&ed->buf);
-            int indent = code ? calc_indent_level(code) : 0;
-            free(code);
-
+            int indent = calc_expected_indent(&ed->buf, ed->buf.line_count);
             mirb_buffer_cursor_down(&ed->buf);
             /* Clear existing whitespace and set correct indent */
             mirb_line *line = &ed->buf.lines[ed->buf.cursor_line];
             line->len = 0;
             line->data[0] = '\0';
             ed->buf.cursor_col = 0;
-            for (int i = 0; i < indent * 2; i++) {
-              mirb_buffer_insert_char(&ed->buf, ' ');
-            }
+            insert_indent_spaces(&ed->buf, indent);
             return TRUE;
           }
         }
@@ -768,18 +693,14 @@ handle_key(mirb_editor *ed, int key, mirb_edit_result *result)
           int indent = calc_indent_level(code);
           free(code);
           mirb_buffer_newline(&ed->buf);
-          for (int i = 0; i < indent * 2; i++) {
-            mirb_buffer_insert_char(&ed->buf, ' ');
-          }
+          insert_indent_spaces(&ed->buf, indent);
           return TRUE;
         }
       }
 
       /* Not at end of last line - just insert/split with appropriate indent */
       {
-        char *partial = mirb_buffer_to_string_upto_line(&ed->buf, ed->buf.cursor_line);
-        int indent = partial ? calc_indent_level(partial) : 0;
-        free(partial);
+        int indent = calc_expected_indent(&ed->buf, ed->buf.cursor_line + 1);
         mirb_buffer_newline(&ed->buf);
 
         /* Check if new line starts with dedenting keyword */
@@ -788,9 +709,7 @@ handle_key(mirb_editor *ed, int key, mirb_edit_result *result)
           if (indent > 0) indent--;
         }
 
-        for (int i = 0; i < indent * 2; i++) {
-          mirb_buffer_insert_char(&ed->buf, ' ');
-        }
+        insert_indent_spaces(&ed->buf, indent);
         return TRUE;
       }
     }
