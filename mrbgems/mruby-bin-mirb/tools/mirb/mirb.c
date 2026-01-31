@@ -313,21 +313,6 @@ parse_args(mrb_state *mrb, int argc, char **argv, struct _args *args)
   return EXIT_SUCCESS;
 }
 
-static void
-cleanup(mrb_state *mrb, struct _args *args)
-{
-  if (args->rfp)
-    fclose(args->rfp);
-  mrb_free(mrb, args->argv);
-  if (args->libc) {
-    while (args->libc--) {
-      mrb_free(mrb, args->libv[args->libc]);
-    }
-    mrb_free(mrb, args->libv);
-  }
-  mrb_close(mrb);
-}
-
 /* Print a short remark for the user */
 static void
 print_hint(void)
@@ -479,13 +464,13 @@ main(int argc, char **argv)
   mrb_bool use_editor = FALSE;
 
   memset(&editor, 0, sizeof(editor));
-  mrb_ccontext *cxt;
+  mrb_ccontext *cxt = NULL;
   struct mrb_parser_state *parser;
   mrb_state *mrb;
   mrb_value result;
   struct _args args;
   mrb_value ARGV;
-  int n;
+  int ret = EXIT_SUCCESS;
   int i;
   mrb_bool code_block_open = FALSE;
   int line_num = 1;
@@ -500,11 +485,10 @@ main(int argc, char **argv)
     return EXIT_FAILURE;
   }
 
-  n = parse_args(mrb, argc, argv, &args);
-  if (n == EXIT_FAILURE) {
-    cleanup(mrb, &args);
+  ret = parse_args(mrb, argc, argv, &args);
+  if (ret == EXIT_FAILURE) {
     usage(argv[0]);
-    return n;
+    goto cleanup;
   }
 
   ARGV = mrb_ary_new_capa(mrb, args.argc);
@@ -532,8 +516,8 @@ main(int argc, char **argv)
     FILE *lfp = fopen(args.libv[i], "r");
     if (lfp == NULL) {
       printf("Cannot open library file. (%s)\n", args.libv[i]);
-      cleanup(mrb, &args);
-      return EXIT_FAILURE;
+      ret = EXIT_FAILURE;
+      goto cleanup;
     }
     mrb_load_file_cxt(mrb, lfp, cxt);
     fclose(lfp);
@@ -786,6 +770,7 @@ main(int argc, char **argv)
     cxt->lineno++;
   }
 
+cleanup:
   if (args.rfp) fclose(args.rfp);
   mrb_free(mrb, args.argv);
   if (args.libv) {
@@ -794,15 +779,12 @@ main(int argc, char **argv)
     }
     mrb_free(mrb, args.libv);
   }
-  mrb_ccontext_free(mrb, cxt);
-
-  /* Cleanup editor */
+  if (cxt) mrb_ccontext_free(mrb, cxt);
   if (use_editor) {
     mirb_cleanup_editor_completion();
     mirb_editor_cleanup(&editor);
   }
-
   mrb_close(mrb);
 
-  return 0;
+  return ret;
 }
