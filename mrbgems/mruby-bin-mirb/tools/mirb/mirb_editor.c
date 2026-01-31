@@ -40,25 +40,38 @@ leading_spaces(const char *line)
 }
 
 /*
- * Check if content starts with a dedenting keyword
- * (end, else, elsif, when, in, rescue, ensure) or '}'
+ * Dedent keyword table: keywords that reduce indentation level.
+ * allow_eol: keyword can appear alone at end of line
+ * delims: valid non-NUL characters that can follow the keyword
  */
+static const struct {
+  const char *word;
+  const char *delims;
+  mrb_bool allow_eol;
+} dedent_table[] = {
+  {"else",   " \t",   TRUE},
+  {"elsif",  " ",     FALSE},
+  {"end",    " \t.)", TRUE},
+  {"ensure", " \t",   TRUE},
+  {"in",     " ",     FALSE},
+  {"rescue", " \t",   TRUE},
+  {"when",   " ",     FALSE},
+};
+
 static mrb_bool
 is_dedent_keyword(const char *content)
 {
+  size_t i;
+
   if (content[0] == '}') return TRUE;
-  if (strncmp(content, "end", 3) == 0 &&
-      (content[3] == '\0' || content[3] == ' ' || content[3] == '\t' ||
-       content[3] == '.' || content[3] == ')')) return TRUE;
-  if (strncmp(content, "else", 4) == 0 &&
-      (content[4] == '\0' || content[4] == ' ' || content[4] == '\t')) return TRUE;
-  if (strncmp(content, "elsif", 5) == 0 && content[5] == ' ') return TRUE;
-  if (strncmp(content, "when", 4) == 0 && content[4] == ' ') return TRUE;
-  if (strncmp(content, "in", 2) == 0 && content[2] == ' ') return TRUE;
-  if (strncmp(content, "rescue", 6) == 0 &&
-      (content[6] == '\0' || content[6] == ' ' || content[6] == '\t')) return TRUE;
-  if (strncmp(content, "ensure", 6) == 0 &&
-      (content[6] == '\0' || content[6] == ' ' || content[6] == '\t')) return TRUE;
+  for (i = 0; i < sizeof(dedent_table)/sizeof(dedent_table[0]); i++) {
+    size_t len = strlen(dedent_table[i].word);
+    if (strncmp(content, dedent_table[i].word, len) == 0) {
+      char c = content[len];
+      if (c == '\0') return dedent_table[i].allow_eol;
+      return strchr(dedent_table[i].delims, c) != NULL;
+    }
+  }
   return FALSE;
 }
 
