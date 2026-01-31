@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
 
 #ifdef MRB_UTF8_STRING
 /*
@@ -783,15 +782,6 @@ mirb_buffer_cursor_finish(mirb_buffer *buf)
 }
 
 /*
- * Helper: Check if character is word character
- */
-static mrb_bool
-is_word_char(char c)
-{
-  return isalnum((unsigned char)c) || c == '_';
-}
-
-/*
  * Move cursor back one word
  */
 mrb_bool
@@ -810,7 +800,7 @@ mirb_buffer_cursor_word_back(mirb_buffer *buf)
     }
 
     char c = buf->lines[buf->cursor_line].data[buf->cursor_col - 1];
-    if (is_word_char(c)) break;
+    if (mirb_is_word_char(c)) break;
     buf->cursor_col--;
     moved = TRUE;
   }
@@ -818,7 +808,7 @@ mirb_buffer_cursor_word_back(mirb_buffer *buf)
   /* Move through word chars */
   while (buf->cursor_col > 0) {
     char c = buf->lines[buf->cursor_line].data[buf->cursor_col - 1];
-    if (!is_word_char(c)) break;
+    if (!mirb_is_word_char(c)) break;
     buf->cursor_col--;
     moved = TRUE;
   }
@@ -837,7 +827,7 @@ mirb_buffer_cursor_word_forward(mirb_buffer *buf)
 
   /* Move through current word chars */
   while (buf->cursor_col < line->len) {
-    if (!is_word_char(line->data[buf->cursor_col])) break;
+    if (!mirb_is_word_char(line->data[buf->cursor_col])) break;
     buf->cursor_col++;
     moved = TRUE;
   }
@@ -853,7 +843,7 @@ mirb_buffer_cursor_word_forward(mirb_buffer *buf)
       continue;
     }
 
-    if (is_word_char(line->data[buf->cursor_col])) break;
+    if (mirb_is_word_char(line->data[buf->cursor_col])) break;
     buf->cursor_col++;
     moved = TRUE;
   }
@@ -960,12 +950,12 @@ mirb_buffer_kill_word_forward(mirb_buffer *buf)
   size_t end_col = start_col;
 
   /* Skip word chars */
-  while (end_col < line->len && is_word_char(line->data[end_col])) {
+  while (end_col < line->len && mirb_is_word_char(line->data[end_col])) {
     end_col++;
   }
 
   /* Skip non-word chars */
-  while (end_col < line->len && !is_word_char(line->data[end_col])) {
+  while (end_col < line->len && !mirb_is_word_char(line->data[end_col])) {
     end_col++;
   }
 

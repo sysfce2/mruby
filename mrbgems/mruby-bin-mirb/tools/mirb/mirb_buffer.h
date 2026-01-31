@@ -182,4 +182,14 @@ size_t mirb_buffer_line_len(mirb_buffer *buf, size_t index);
  */
 size_t mirb_buffer_cursor_display_col(mirb_buffer *buf);
 
+/*
+ * Check if character is a word character (alphanumeric or underscore)
+ */
+static inline mrb_bool
+mirb_is_word_char(char c)
+{
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '_';
+}
+
 #endif /* MIRB_BUFFER_H */

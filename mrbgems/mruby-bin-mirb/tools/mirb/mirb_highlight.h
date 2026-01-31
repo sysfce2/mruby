@@ -98,4 +98,7 @@ void mirb_highlight_print_result(mirb_highlighter *hl, const char *result);
  */
 void mirb_highlight_print_error(mirb_highlighter *hl, const char *error);
 
+/* Common ANSI reset code shared across modules */
+#define COLOR_RESET "\033[0m"
+
 #endif /* MIRB_HIGHLIGHT_H */
