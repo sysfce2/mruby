@@ -49,6 +49,12 @@ typedef struct mirb_highlighter {
 } mirb_highlighter;
 
 /*
+ * Ruby keyword list (sorted alphabetically, NULL-terminated)
+ */
+extern const char *mirb_keywords[];
+extern const size_t mirb_num_keywords;
+
+/*
  * Initialize highlighter with auto-detected or specified theme
  */
 void mirb_highlight_init(mirb_highlighter *hl, mrb_bool enabled);

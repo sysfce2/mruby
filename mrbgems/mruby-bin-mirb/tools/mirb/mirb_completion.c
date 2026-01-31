@@ -5,6 +5,7 @@
 */
 
 #include "mirb_completion.h"
+#include "mirb_highlight.h"
 #include <mruby/array.h>
 #include <mruby/class.h>
 #include <mruby/compile.h>
@@ -57,17 +58,6 @@ strndup(const char *s, size_t n)
 #ifndef ISALNUM
 #define ISALNUM(c) isalnum((unsigned char)(c))
 #endif
-
-/* Ruby keywords */
-static const char *ruby_keywords[] = {
-  "BEGIN", "END", "__ENCODING__", "__FILE__", "__LINE__",
-  "alias", "and", "begin", "break", "case", "class", "def",
-  "defined?", "do", "else", "elsif", "end", "ensure", "false",
-  "for", "if", "in", "module", "next", "nil", "not", "or",
-  "redo", "rescue", "retry", "return", "self", "super", "then",
-  "true", "undef", "unless", "until", "when", "while", "yield",
-  NULL
-};
 
 /* ============================================================
  * Core Completion Engine
@@ -377,8 +367,8 @@ void
 mirb_complete_keywords(mirb_completion_ctx *ctx)
 {
   int i;
-  for (i = 0; ruby_keywords[i] != NULL; i++) {
-    mirb_add_completion(ctx, ruby_keywords[i]);
+  for (i = 0; mirb_keywords[i] != NULL; i++) {
+    mirb_add_completion(ctx, mirb_keywords[i]);
   }
 }
 

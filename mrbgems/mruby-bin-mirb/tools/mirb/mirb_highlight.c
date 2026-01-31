@@ -43,16 +43,17 @@
 
 #define COLOR_RESET    "\033[0m"
 
-/* Keyword list - must be sorted alphabetically for bsearch */
-static const char *keywords[] = {
+/* Keyword list - sorted alphabetically for bsearch, NULL-terminated */
+const char *mirb_keywords[] = {
   "BEGIN", "END", "__ENCODING__", "__FILE__", "__LINE__",
   "alias", "and", "begin", "break", "case", "class", "def",
   "defined?", "do", "else", "elsif", "end", "ensure", "false",
   "for", "if", "in", "module", "next", "nil", "not", "or",
   "redo", "rescue", "retry", "return", "self", "super", "then",
-  "true", "undef", "unless", "until", "when", "while", "yield"
+  "true", "undef", "unless", "until", "when", "while", "yield",
+  NULL
 };
-#define NUM_KEYWORDS (sizeof(keywords) / sizeof(keywords[0]))
+const size_t mirb_num_keywords = sizeof(mirb_keywords) / sizeof(mirb_keywords[0]) - 1;
 
 static int
 keyword_cmp(const void *a, const void *b)
@@ -68,7 +69,7 @@ is_keyword(const char *word, size_t len)
   if (len >= sizeof(buf)) return FALSE;
   memcpy(buf, word, len);
   buf[len] = '\0';
-  return bsearch(buf, keywords, NUM_KEYWORDS, sizeof(keywords[0]), keyword_cmp) != NULL;
+  return bsearch(buf, mirb_keywords, mirb_num_keywords, sizeof(mirb_keywords[0]), keyword_cmp) != NULL;
 }
 
 static mrb_bool
