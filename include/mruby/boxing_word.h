@@ -178,7 +178,7 @@ mrb_integer_func(mrb_value o) {
 #ifndef MRB_NO_FLOAT
 #ifdef MRB_WORDBOX_NO_FLOAT_TRUNCATE
 #define mrb_float_p(o) WORDBOX_OBJ_TYPE_P(o, FLOAT)
-#elif defined(MRB_USE_FLOAT32)
+#elif defined(MRB_USE_FLOAT32) && defined(MRB_64BIT)
 #define mrb_float_p(o) WORDBOX_SHIFT_VALUE_P(o, FLOAT)
 #else
 /* rotation encoding: most floats inline, edge cases on heap */

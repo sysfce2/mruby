@@ -182,32 +182,26 @@ mrb_obj_id(mrb_value obj)
  *   RFloat object on the heap.
  * - If `MRB_64BIT` and `MRB_USE_FLOAT32` are defined, it stores the float
  *   in the lower bits of the word, shifted and tagged.
- * - Otherwise (64-bit float64), it uses rotation encoding to store the
- *   float losslessly inline. Floats outside the inline exponent range
- *   [-255, +256] are heap-allocated as RFloat.
+ * - 64-bit float64: rotation encoding, lossless for exponents [-255, +256].
+ * - 32-bit float32: rotation encoding, lossless for exponents [-32, +31].
+ *   Floats outside the inline range are heap-allocated as RFloat.
  */
 
-#if !defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE) && !defined(MRB_USE_FLOAT32)
+#if !defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE) && \
+    (!defined(MRB_USE_FLOAT32) || !defined(MRB_64BIT))
 /*
- * Rotation-based float encoding for 64-bit + float64.
+ * Rotation-based float encoding (shared between 64-bit float64 and
+ * 32-bit float32 paths).
  *
- * Encode: rotl64(float64_bits - ADDEND, 3) produces a tagged value
- *         with bottom 2 bits == 10 (WORDBOX_FLOAT_FLAG).
- * Decode: rotl64(tagged_value, 61) + ADDEND recovers the original bits.
+ * Encode: rotl(bits - ADDEND, 3) produces a tagged value with bottom
+ *         2 bits == 10 (WORDBOX_FLOAT_FLAG).
+ * Decode: rotl(tagged_value, N-3) + ADDEND recovers the original bits.
  *
- * The addend shifts the exponent so that biased exponents [768, 1279]
- * (actual [-255, +256]) produce the correct tag pattern after rotation.
- * This covers all practical float values with full precision.
- *
- * Special values (0.0, -0.0, +Inf, -Inf) are encoded as small sentinel
- * constants that also have bottom 2 bits == 10.  This avoids heap
- * allocation for these common values.  The 4 obscure floats whose
- * rotation would collide with a sentinel are heap-allocated instead.
+ * Special values (0.0, -0.0, +Inf, -Inf, NaN) are encoded as small
+ * sentinel constants that also have bottom 2 bits == 10.  This avoids
+ * heap allocation for these common values.
  */
 #define WORDBOX_FLOAT_ROTATE      3
-#define WORDBOX_FLOAT_EXP_MIN     (1023 - 255)  /* 768 */
-#define WORDBOX_FLOAT_EXP_MAX     (1023 + 256)  /* 1279 */
-#define WORDBOX_FLOAT_ADDEND      ((uint64_t)(WORDBOX_FLOAT_EXP_MIN - (WORDBOX_FLOAT_FLAG << 9)) << 52)
 
 /* sentinel values for special floats (all have & 3 == 2) */
 #define WORDBOX_FLOAT_PZERO       0x02  /* +0.0 */
@@ -216,6 +210,52 @@ mrb_obj_id(mrb_value obj)
 #define WORDBOX_FLOAT_NINF        0x0e  /* -Infinity */
 #define WORDBOX_FLOAT_NAN         0x12  /* NaN (all NaN bit patterns normalize to this) */
 #define WORDBOX_FLOAT_SENTINEL_MAX  WORDBOX_FLOAT_NAN
+
+#if defined(MRB_USE_FLOAT32) && !defined(MRB_64BIT)
+/*
+ * 32-bit + float32 rotation.
+ *
+ * Biased exponents [95, 158] (actual [-32, +31]) produce the correct
+ * tag pattern after rotation, covering values ~2.3e-10 to ~4.3e9.
+ * Out-of-range floats are heap-allocated as RFloat.
+ */
+#define WORDBOX_FLOAT32_EXP_MIN   95   /* biased, actual -32 */
+#define WORDBOX_FLOAT32_EXP_MAX   158  /* biased, actual +31 */
+#define WORDBOX_FLOAT32_ADDEND    ((uint32_t)(WORDBOX_FLOAT32_EXP_MIN - (WORDBOX_FLOAT_FLAG << 6)) << 23)
+
+static uint32_t
+wordbox_rotl32(uint32_t a, int n)
+{
+  return (a << n) | (a >> (32 - n));
+}
+
+static uint32_t
+wordbox_float32_to_u32(float f)
+{
+  union { float f; uint32_t u; } u;
+  u.f = f;
+  return u.u;
+}
+
+static float
+wordbox_u32_to_float32(uint32_t v)
+{
+  union { float f; uint32_t u; } u;
+  u.u = v;
+  return u.f;
+}
+
+#else /* 64-bit + float64 */
+/*
+ * 64-bit + float64 rotation.
+ *
+ * Biased exponents [768, 1279] (actual [-255, +256]) produce the
+ * correct tag pattern.  Obscure floats whose rotation would collide
+ * with a sentinel are heap-allocated instead.
+ */
+#define WORDBOX_FLOAT_EXP_MIN     (1023 - 255)  /* 768 */
+#define WORDBOX_FLOAT_EXP_MAX     (1023 + 256)  /* 1279 */
+#define WORDBOX_FLOAT_ADDEND      ((uint64_t)(WORDBOX_FLOAT_EXP_MIN - (WORDBOX_FLOAT_FLAG << 9)) << 52)
 
 static uint64_t
 wordbox_rotl64(uint64_t a, int n)
@@ -238,6 +278,7 @@ wordbox_u64_to_float64(uint64_t v)
   u.u = v;
   return u.d;
 }
+#endif /* MRB_USE_FLOAT32 && !MRB_64BIT */
 #endif
 
 MRB_API mrb_value
@@ -287,9 +328,39 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
     }
   }
 #else
-  /* 32-bit + float32: truncate bottom 2 bits */
-  v.f = f;
-  v.w = (v.w & ~3) | 2;
+  /* 32-bit + float32: rotation encoding */
+  {
+    uint32_t bits = wordbox_float32_to_u32(f);
+    uint32_t exp = (bits >> 23) & 0xFF;
+    if (exp == 0) {
+      /* +0.0 or -0.0 (subnormals also fall here, go to heap) */
+      if (bits == 0u)
+        v.w = WORDBOX_FLOAT_PZERO;
+      else if (bits == 0x80000000u)
+        v.w = WORDBOX_FLOAT_NZERO;
+      else goto float_heap;
+    }
+    else if (exp == 0xFF) {
+      /* +Inf, -Inf, or NaN */
+      if (bits == 0x7F800000u)
+        v.w = WORDBOX_FLOAT_PINF;
+      else if (bits == 0xFF800000u)
+        v.w = WORDBOX_FLOAT_NINF;
+      else
+        v.w = WORDBOX_FLOAT_NAN;
+    }
+    else if (exp >= WORDBOX_FLOAT32_EXP_MIN && exp <= WORDBOX_FLOAT32_EXP_MAX) {
+      uintptr_t w = (uintptr_t)wordbox_rotl32(bits - WORDBOX_FLOAT32_ADDEND, WORDBOX_FLOAT_ROTATE);
+      if (w <= WORDBOX_FLOAT_SENTINEL_MAX) goto float_heap;
+      v.w = w;
+    }
+    else {
+    float_heap:
+      v.p = mrb_obj_alloc(mrb, MRB_TT_FLOAT, mrb->float_class);
+      v.fp->f = f;
+      v.bp->frozen = 1;
+    }
+  }
 #endif
   return v.value;
 }
@@ -298,9 +369,9 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
 #ifndef MRB_WORDBOX_NO_FLOAT_TRUNCATE
 /*
  * Unboxes an `mrb_value` to an `mrb_float`.
- * - If `MRB_USE_FLOAT32`: right-shift by 2 to retrieve the float.
- * - Otherwise (rotation encoding): decode inline floats via rotation,
- *   or read from heap RFloat for edge cases.
+ * - 64-bit + float32: right-shift by 2 to retrieve the float.
+ * - 64-bit + float64 / 32-bit + float32 (rotation encoding):
+ *   decode inline floats via rotation, or read from heap RFloat.
  */
 MRB_API mrb_float
 mrb_word_boxing_value_float(mrb_value v)
@@ -331,11 +402,26 @@ mrb_word_boxing_value_float(mrb_value v)
     return u.fp->f;
   }
 #else
-  /* 32-bit + float32: clear tag bits */
-  union mrb_value_ u;
-  u.value = v;
-  u.w &= ~3;
-  return u.f;
+  /* 32-bit + float32: rotation decoding */
+  if ((v.w & WORDBOX_FLOAT_MASK) == WORDBOX_FLOAT_FLAG) {
+    if (v.w <= WORDBOX_FLOAT_SENTINEL_MAX) {
+      switch (v.w) {
+      case WORDBOX_FLOAT_PZERO: return (mrb_float)( 0.0f);
+      case WORDBOX_FLOAT_NZERO: return (mrb_float)(-0.0f);
+      case WORDBOX_FLOAT_PINF:  return (mrb_float)( INFINITY);
+      case WORDBOX_FLOAT_NINF:  return (mrb_float)(-INFINITY);
+      case WORDBOX_FLOAT_NAN:   return (mrb_float)  NAN;
+      default: break;  /* not reached */
+      }
+    }
+    return (mrb_float)wordbox_u32_to_float32(
+      wordbox_rotl32((uint32_t)v.w, 32 - WORDBOX_FLOAT_ROTATE) + WORDBOX_FLOAT32_ADDEND);
+  }
+  else {
+    union mrb_value_ u;
+    u.value = v;
+    return u.fp->f;
+  }
 #endif
 }
 #endif

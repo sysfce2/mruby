@@ -121,7 +121,13 @@ struct free_obj {
 
 struct RVALUE_initializer {
   MRB_OBJECT_HEADER;
+#if defined(MRB_32BIT) && defined(MRB_USE_FLOAT32) && !defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE)
+  /* inline float word boxing needs 8-byte aligned objects;
+     pad RVALUE to 24 bytes (multiple of 8) on 32-bit */
+  char padding[sizeof(void*) * 4];
+#else
   char padding[sizeof(void*) * 3];
+#endif
 };
 
 struct RVALUE {
@@ -1594,7 +1600,13 @@ mrb_init_gc(mrb_state *mrb)
 {
   struct RClass *gc;
 
+#if defined(MRB_32BIT) && defined(MRB_USE_FLOAT32) && !defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE)
+  /* 6 words: padded to 8-byte alignment for inline float word boxing */
+  mrb_static_assert(sizeof(RVALUE) <= sizeof(void*) * 6,
+                    "RVALUE size must be within 6 words");
+#else
   mrb_static_assert_object_size(RVALUE);
+#endif
 
   gc = mrb_define_module_id(mrb, MRB_SYM(GC));
 
