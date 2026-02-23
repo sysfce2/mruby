@@ -90,6 +90,32 @@ is_line_blank(const mirb_line *line)
 }
 
 /*
+ * Indent keyword table: keywords that affect indentation level.
+ * delta: +1 for block-opening, -1 for block-closing
+ * allow_eol: keyword can appear at end of line/string
+ * delims: valid non-NUL characters that can follow the keyword
+ */
+static const struct {
+  const char *word;
+  const char *delims;
+  mrb_bool allow_eol;
+  int delta;
+} indent_table[] = {
+  {"begin",  "\n #",    TRUE,  +1},
+  {"case",   " ",       FALSE, +1},
+  {"class",  " ",       FALSE, +1},
+  {"def",    " ",       FALSE, +1},
+  {"do",     "\n #|",   TRUE,  +1},
+  {"end",    "\n #.)",  TRUE,  -1},
+  {"for",    " ",       FALSE, +1},
+  {"if",     " ",       FALSE, +1},
+  {"module", " ",       FALSE, +1},
+  {"unless", " ",       FALSE, +1},
+  {"until",  " ",       FALSE, +1},
+  {"while",  " ",       FALSE, +1},
+};
+
+/*
  * Calculate indent level by counting open blocks in code
  */
 static int
@@ -127,29 +153,20 @@ calc_indent_level(const char *code)
       p++;
       continue;
     }
-    /* Check for block-opening keywords at word boundary */
-    if (at_line_start || (p > code && !((p[-1] >= 'a' && p[-1] <= 'z') ||
-                                         (p[-1] >= 'A' && p[-1] <= 'Z') ||
-                                         (p[-1] >= '0' && p[-1] <= '9') ||
-                                         p[-1] == '_'))) {
-      /* Check block-opening keywords */
-      if ((strncmp(p, "def ", 4) == 0) ||
-          (strncmp(p, "class ", 6) == 0) ||
-          (strncmp(p, "module ", 7) == 0) ||
-          (strncmp(p, "if ", 3) == 0) ||
-          (strncmp(p, "unless ", 7) == 0) ||
-          (strncmp(p, "case ", 5) == 0) ||
-          (strncmp(p, "while ", 6) == 0) ||
-          (strncmp(p, "until ", 6) == 0) ||
-          (strncmp(p, "for ", 4) == 0) ||
-          (strncmp(p, "begin", 5) == 0 && (p[5] == '\0' || p[5] == '\n' || p[5] == ' ' || p[5] == '#')) ||
-          (strncmp(p, "do", 2) == 0 && (p[2] == '\0' || p[2] == '\n' || p[2] == ' ' || p[2] == '#' || p[2] == '|'))) {
-        level++;
-      }
-      /* Check block-closing keyword */
-      else if (strncmp(p, "end", 3) == 0 &&
-               (p[3] == '\0' || p[3] == '\n' || p[3] == ' ' || p[3] == '#' || p[3] == '.' || p[3] == ')')) {
-        if (level > 0) level--;
+    /* Check for block keywords at word boundary */
+    if (at_line_start || (p > code && !mirb_is_word_char(p[-1]))) {
+      size_t ki;
+      for (ki = 0; ki < sizeof(indent_table)/sizeof(indent_table[0]); ki++) {
+        size_t len = strlen(indent_table[ki].word);
+        if (strncmp(p, indent_table[ki].word, len) == 0) {
+          char c = p[len];
+          if ((c == '\0' && indent_table[ki].allow_eol) ||
+              (c != '\0' && strchr(indent_table[ki].delims, c))) {
+            level += indent_table[ki].delta;
+            if (level < 0) level = 0;
+          }
+          break;
+        }
       }
     }
     /* Check for block opening/closing with braces */
