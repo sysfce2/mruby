@@ -570,13 +570,37 @@ mirb_generate_completions(mirb_completion_ctx *ctx, const char *line, int cursor
 }
 
 /* ============================================================
+ * Shared Completion Context
+ * ============================================================ */
+
+static mirb_completion_ctx *g_ctx = NULL;
+
+static mrb_bool
+init_completion_ctx(mrb_state *mrb, mrb_ccontext *cxt)
+{
+  if (g_ctx) return TRUE;
+  g_ctx = (mirb_completion_ctx*)malloc(sizeof(mirb_completion_ctx));
+  if (!g_ctx) return FALSE;
+  mirb_completion_init(g_ctx, mrb, cxt);
+  return TRUE;
+}
+
+void
+mirb_cleanup_completion(void)
+{
+  if (g_ctx) {
+    mirb_completion_free(g_ctx);
+    free(g_ctx);
+    g_ctx = NULL;
+  }
+}
+
+/* ============================================================
  * Readline/Libedit Adapter
  * ============================================================ */
 
 #ifdef MRB_USE_READLINE
 #ifndef MRB_USE_LINENOISE
-
-static mirb_completion_ctx *g_readline_ctx = NULL;
 
 static char *
 mirb_readline_generator(const char *text, int state)
@@ -585,18 +609,18 @@ mirb_readline_generator(const char *text, int state)
 
   /* state == 0: first call, generate completions */
   if (state == 0) {
-    mirb_completion_free(g_readline_ctx);
+    mirb_completion_free(g_ctx);
 
     /* Generate completions based on full line */
-    mirb_generate_completions(g_readline_ctx, rl_line_buffer, rl_point);
+    mirb_generate_completions(g_ctx, rl_line_buffer, rl_point);
 
-    g_readline_ctx->current_index = 0;
+    g_ctx->current_index = 0;
   }
 
   /* Return next completion or NULL when done */
-  if (g_readline_ctx->current_index < g_readline_ctx->completion_count) {
-    char *completion = g_readline_ctx->completions[g_readline_ctx->current_index];
-    g_readline_ctx->current_index++;
+  if (g_ctx->current_index < g_ctx->completion_count) {
+    char *completion = g_ctx->completions[g_ctx->current_index];
+    g_ctx->current_index++;
 
     /* readline will free this, so duplicate */
     return strdup(completion);
@@ -621,11 +645,7 @@ mirb_readline_completion(const char *text, int start, int end)
 void
 mirb_setup_readline_completion(mrb_state *mrb, mrb_ccontext *cxt)
 {
-  /* Initialize global context */
-  g_readline_ctx = (mirb_completion_ctx*)malloc(sizeof(mirb_completion_ctx));
-  if (!g_readline_ctx) return;
-
-  mirb_completion_init(g_readline_ctx, mrb, cxt);
+  if (!init_completion_ctx(mrb, cxt)) return;
 
   /* Set completion function */
   rl_attempted_completion_function = mirb_readline_completion;
@@ -633,16 +653,6 @@ mirb_setup_readline_completion(mrb_state *mrb, mrb_ccontext *cxt)
   /* Configure readline behavior - include . so "obj.method" are separate words */
   rl_basic_word_break_characters = " \t\n\"\\'`@$><=;|&{(.";
   rl_completer_word_break_characters = " \t\n\"\\'`@$><=;|&{(.";
-}
-
-void
-mirb_cleanup_readline_completion(void)
-{
-  if (g_readline_ctx) {
-    mirb_completion_free(g_readline_ctx);
-    free(g_readline_ctx);
-    g_readline_ctx = NULL;
-  }
 }
 
 #endif
@@ -654,8 +664,6 @@ mirb_cleanup_readline_completion(void)
 
 #ifdef MRB_USE_LINENOISE
 
-static mirb_completion_ctx *g_linenoise_ctx = NULL;
-
 static void
 mirb_linenoise_completion(const char *buf, linenoiseCompletions *lc)
 {
@@ -664,15 +672,15 @@ mirb_linenoise_completion(const char *buf, linenoiseCompletions *lc)
   char completion_line[1024];
 
   /* Clear previous completions */
-  mirb_completion_free(g_linenoise_ctx);
+  mirb_completion_free(g_ctx);
 
   /* Generate completions */
-  mirb_generate_completions(g_linenoise_ctx, buf, cursor_pos);
+  mirb_generate_completions(g_ctx, buf, cursor_pos);
 
   /* Add each completion to linenoise */
-  for (i = 0; i < g_linenoise_ctx->completion_count; i++) {
+  for (i = 0; i < g_ctx->completion_count; i++) {
     /* Need to build full line with completion */
-    prefix_start = cursor_pos - g_linenoise_ctx->prefix_len;
+    prefix_start = cursor_pos - g_ctx->prefix_len;
 
     /* Copy line up to prefix */
     if (prefix_start > 0) {
@@ -680,7 +688,7 @@ mirb_linenoise_completion(const char *buf, linenoiseCompletions *lc)
     }
 
     /* Add completion */
-    strcpy(completion_line + prefix_start, g_linenoise_ctx->completions[i]);
+    strcpy(completion_line + prefix_start, g_ctx->completions[i]);
 
     linenoiseAddCompletion(lc, completion_line);
   }
@@ -689,24 +697,10 @@ mirb_linenoise_completion(const char *buf, linenoiseCompletions *lc)
 void
 mirb_setup_linenoise_completion(mrb_state *mrb, mrb_ccontext *cxt)
 {
-  /* Initialize global context */
-  g_linenoise_ctx = (mirb_completion_ctx*)malloc(sizeof(mirb_completion_ctx));
-  if (!g_linenoise_ctx) return;
-
-  mirb_completion_init(g_linenoise_ctx, mrb, cxt);
+  if (!init_completion_ctx(mrb, cxt)) return;
 
   /* Set completion callback */
   linenoiseSetCompletionCallback(mirb_linenoise_completion);
-}
-
-void
-mirb_cleanup_linenoise_completion(void)
-{
-  if (g_linenoise_ctx) {
-    mirb_completion_free(g_linenoise_ctx);
-    free(g_linenoise_ctx);
-    g_linenoise_ctx = NULL;
-  }
 }
 
 #endif
@@ -715,26 +709,10 @@ mirb_cleanup_linenoise_completion(void)
  * Custom Editor Adapter
  * ============================================================ */
 
-static mirb_completion_ctx *g_editor_ctx = NULL;
-
 void
 mirb_setup_editor_completion(mrb_state *mrb, mrb_ccontext *cxt)
 {
-  /* Initialize global context */
-  g_editor_ctx = (mirb_completion_ctx*)malloc(sizeof(mirb_completion_ctx));
-  if (!g_editor_ctx) return;
-
-  mirb_completion_init(g_editor_ctx, mrb, cxt);
-}
-
-void
-mirb_cleanup_editor_completion(void)
-{
-  if (g_editor_ctx) {
-    mirb_completion_free(g_editor_ctx);
-    free(g_editor_ctx);
-    g_editor_ctx = NULL;
-  }
+  init_completion_ctx(mrb, cxt);
 }
 
 int
@@ -743,35 +721,35 @@ mirb_get_completions(const char *line, int cursor_pos,
 {
   int i;
 
-  if (!g_editor_ctx) {
+  if (!g_ctx) {
     *completions_out = NULL;
     *prefix_len_out = 0;
     return 0;
   }
 
   /* Clear previous completions */
-  mirb_completion_free(g_editor_ctx);
+  mirb_completion_free(g_ctx);
 
   /* Generate completions */
-  mirb_generate_completions(g_editor_ctx, line, cursor_pos);
+  mirb_generate_completions(g_ctx, line, cursor_pos);
 
   /* Return results */
-  *prefix_len_out = g_editor_ctx->prefix_len;
+  *prefix_len_out = g_ctx->prefix_len;
 
-  if (g_editor_ctx->completion_count == 0) {
+  if (g_ctx->completion_count == 0) {
     *completions_out = NULL;
     return 0;
   }
 
   /* Copy completions (caller will free) */
-  *completions_out = (char**)malloc(g_editor_ctx->completion_count * sizeof(char*));
+  *completions_out = (char**)malloc(g_ctx->completion_count * sizeof(char*));
   if (!*completions_out) return 0;
 
-  for (i = 0; i < g_editor_ctx->completion_count; i++) {
-    (*completions_out)[i] = strdup(g_editor_ctx->completions[i]);
+  for (i = 0; i < g_ctx->completion_count; i++) {
+    (*completions_out)[i] = strdup(g_ctx->completions[i]);
   }
 
-  return g_editor_ctx->completion_count;
+  return g_ctx->completion_count;
 }
 
 void

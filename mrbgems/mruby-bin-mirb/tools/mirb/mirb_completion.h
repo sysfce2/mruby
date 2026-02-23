@@ -100,27 +100,23 @@ mrb_value mirb_eval_receiver(mrb_state *mrb, const char *receiver_expr, mrb_ccon
 /* Check if in file completion context */
 mrb_bool mirb_in_file_context(const char *line, int quote_pos);
 
+/* Cleanup completion context (shared by all adapters) */
+void mirb_cleanup_completion(void);
+
 /* Readline/Libedit adapter setup */
 #ifdef MRB_USE_READLINE
 #ifndef MRB_USE_LINENOISE
-
 void mirb_setup_readline_completion(mrb_state *mrb, mrb_ccontext *cxt);
-void mirb_cleanup_readline_completion(void);
-
 #endif
 #endif
 
 /* Linenoise adapter setup */
 #ifdef MRB_USE_LINENOISE
-
 void mirb_setup_linenoise_completion(mrb_state *mrb, mrb_ccontext *cxt);
-void mirb_cleanup_linenoise_completion(void);
-
 #endif
 
 /* Custom editor adapter */
 void mirb_setup_editor_completion(mrb_state *mrb, mrb_ccontext *cxt);
-void mirb_cleanup_editor_completion(void);
 
 /* Get completions for custom editor - returns number of completions */
 int mirb_get_completions(const char *line, int cursor_pos,

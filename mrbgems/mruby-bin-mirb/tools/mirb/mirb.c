@@ -781,7 +781,7 @@ cleanup:
   }
   if (cxt) mrb_ccontext_free(mrb, cxt);
   if (use_editor) {
-    mirb_cleanup_editor_completion();
+    mirb_cleanup_completion();
     mirb_editor_cleanup(&editor);
   }
   mrb_close(mrb);
