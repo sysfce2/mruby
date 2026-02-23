@@ -257,6 +257,22 @@ line_set(mirb_line *line, const char *str, size_t len)
 }
 
 /*
+ * Helper: Ensure buffer has capacity for one more line
+ */
+static mrb_bool
+buffer_ensure_line_cap(mirb_buffer *buf)
+{
+  if (buf->line_count < buf->line_cap) return TRUE;
+  size_t new_cap = buf->line_cap * 2;
+  if (new_cap > MIRB_BUF_LINES_MAX) return FALSE;
+  mirb_line *new_lines = (mirb_line*)realloc(buf->lines, sizeof(mirb_line) * new_cap);
+  if (new_lines == NULL) return FALSE;
+  buf->lines = new_lines;
+  buf->line_cap = new_cap;
+  return TRUE;
+}
+
+/*
  * Initialize buffer
  */
 mrb_bool
@@ -396,14 +412,7 @@ mirb_buffer_set_string(mirb_buffer *buf, const char *str)
       /* Set current line */
       if (line_idx >= buf->line_count) {
         /* Need to add new line */
-        if (buf->line_count >= buf->line_cap) {
-          size_t new_cap = buf->line_cap * 2;
-          if (new_cap > MIRB_BUF_LINES_MAX) return FALSE;
-          mirb_line *new_lines = (mirb_line*)realloc(buf->lines, sizeof(mirb_line) * new_cap);
-          if (new_lines == NULL) return FALSE;
-          buf->lines = new_lines;
-          buf->line_cap = new_cap;
-        }
+        if (!buffer_ensure_line_cap(buf)) return FALSE;
         if (!line_init(&buf->lines[buf->line_count])) return FALSE;
         buf->line_count++;
       }
@@ -421,14 +430,7 @@ mirb_buffer_set_string(mirb_buffer *buf, const char *str)
   /* Handle last line (may not end with newline) */
   if (start < p || line_idx == 0) {
     if (line_idx >= buf->line_count) {
-      if (buf->line_count >= buf->line_cap) {
-        size_t new_cap = buf->line_cap * 2;
-        if (new_cap > MIRB_BUF_LINES_MAX) return FALSE;
-        mirb_line *new_lines = (mirb_line*)realloc(buf->lines, sizeof(mirb_line) * new_cap);
-        if (new_lines == NULL) return FALSE;
-        buf->lines = new_lines;
-        buf->line_cap = new_cap;
-      }
+      if (!buffer_ensure_line_cap(buf)) return FALSE;
       if (!line_init(&buf->lines[buf->line_count])) return FALSE;
       buf->line_count++;
     }
@@ -581,14 +583,7 @@ mrb_bool
 mirb_buffer_newline(mirb_buffer *buf)
 {
   /* Ensure we have room for a new line */
-  if (buf->line_count >= buf->line_cap) {
-    size_t new_cap = buf->line_cap * 2;
-    if (new_cap > MIRB_BUF_LINES_MAX) return FALSE;
-    mirb_line *new_lines = (mirb_line*)realloc(buf->lines, sizeof(mirb_line) * new_cap);
-    if (new_lines == NULL) return FALSE;
-    buf->lines = new_lines;
-    buf->line_cap = new_cap;
-  }
+  if (!buffer_ensure_line_cap(buf)) return FALSE;
 
   mirb_line *curr = &buf->lines[buf->cursor_line];
   size_t split_pos = buf->cursor_col;
