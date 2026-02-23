@@ -273,6 +273,28 @@ buffer_ensure_line_cap(mirb_buffer *buf)
 }
 
 /*
+ * Helper: Join line at line_idx with the previous line (line_idx-1).
+ * Appends content of line_idx to line_idx-1, then removes line_idx.
+ */
+static mrb_bool
+buffer_join_line_up(mirb_buffer *buf, size_t line_idx)
+{
+  mirb_line *prev = &buf->lines[line_idx - 1];
+  mirb_line *curr = &buf->lines[line_idx];
+
+  if (!line_ensure_cap(prev, curr->len)) return FALSE;
+  memcpy(prev->data + prev->len, curr->data, curr->len + 1);
+  prev->len += curr->len;
+
+  line_free(curr);
+  memmove(&buf->lines[line_idx],
+          &buf->lines[line_idx + 1],
+          sizeof(mirb_line) * (buf->line_count - line_idx - 1));
+  buf->line_count--;
+  return TRUE;
+}
+
+/*
  * Initialize buffer
  */
 mrb_bool
@@ -504,22 +526,8 @@ mirb_buffer_delete_back(mirb_buffer *buf)
   }
   else if (buf->cursor_line > 0) {
     /* Join with previous line */
-    mirb_line *prev = &buf->lines[buf->cursor_line - 1];
-    mirb_line *curr = &buf->lines[buf->cursor_line];
-    size_t prev_len = prev->len;
-
-    /* Append current line to previous */
-    if (!line_ensure_cap(prev, curr->len)) return FALSE;
-    memcpy(prev->data + prev->len, curr->data, curr->len + 1);
-    prev->len += curr->len;
-
-    /* Remove current line */
-    line_free(curr);
-    memmove(&buf->lines[buf->cursor_line],
-            &buf->lines[buf->cursor_line + 1],
-            sizeof(mirb_line) * (buf->line_count - buf->cursor_line - 1));
-    buf->line_count--;
-
+    size_t prev_len = buf->lines[buf->cursor_line - 1].len;
+    if (!buffer_join_line_up(buf, buf->cursor_line)) return FALSE;
     buf->cursor_line--;
     buf->cursor_col = prev_len;
     buf->modified = TRUE;
@@ -555,21 +563,7 @@ mirb_buffer_delete_forward(mirb_buffer *buf)
   }
   else if (buf->cursor_line < buf->line_count - 1) {
     /* Join with next line */
-    mirb_line *curr = &buf->lines[buf->cursor_line];
-    mirb_line *next = &buf->lines[buf->cursor_line + 1];
-
-    /* Append next line to current */
-    if (!line_ensure_cap(curr, next->len)) return FALSE;
-    memcpy(curr->data + curr->len, next->data, next->len + 1);
-    curr->len += next->len;
-
-    /* Remove next line */
-    line_free(next);
-    memmove(&buf->lines[buf->cursor_line + 1],
-            &buf->lines[buf->cursor_line + 2],
-            sizeof(mirb_line) * (buf->line_count - buf->cursor_line - 2));
-    buf->line_count--;
-
+    if (!buffer_join_line_up(buf, buf->cursor_line + 1)) return FALSE;
     buf->modified = TRUE;
     return TRUE;
   }
