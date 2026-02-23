@@ -16,7 +16,6 @@
 #include <mruby/value.h>
 #include <mruby/variable.h>
 
-#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,14 +48,6 @@ strndup(const char *s, size_t n)
 
 #ifdef MRB_USE_LINENOISE
 #include <linenoise.h>
-#endif
-
-/* Helper macros */
-#ifndef ISSPACE
-#define ISSPACE(c) isspace((unsigned char)(c))
-#endif
-#ifndef ISALNUM
-#define ISALNUM(c) isalnum((unsigned char)(c))
 #endif
 
 /* ============================================================
