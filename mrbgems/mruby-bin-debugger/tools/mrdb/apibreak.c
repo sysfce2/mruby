@@ -65,22 +65,11 @@ static int32_t
 get_break_index(mrb_debug_context *dbg, uint32_t bpno)
 {
   uint32_t i;
-  int32_t index;
-  char hit = FALSE;
 
   for (i = 0; i < dbg->bpnum; i++) {
-    if (dbg->bp[i].bpno == bpno) {
-      hit = TRUE;
-      index = i;
-      break;
-    }
+    if (dbg->bp[i].bpno == bpno) return i;
   }
-
-  if (hit == FALSE) {
-    return MRB_DEBUG_BREAK_INVALID_NO;
-  }
-
-  return index;
+  return MRB_DEBUG_BREAK_INVALID_NO;
 }
 
 static int32_t
