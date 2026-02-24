@@ -559,6 +559,22 @@ check_method_breakpoint(mrb_state *mrb, const mrb_irep *irep, const mrb_code *pc
   return bpno;
 }
 
+static int32_t
+check_breakpoint_hit(mrb_state *mrb, mrb_debug_context *dbg,
+                     const mrb_irep *irep, const mrb_code *pc,
+                     const char *file, int32_t line, mrb_value *regs)
+{
+  int32_t bpno;
+
+  bpno = check_method_breakpoint(mrb, irep, pc, regs);
+  if (bpno > 0) return bpno;
+  if (dbg->prvfile != file || dbg->prvline != line) {
+    bpno = mrb_debug_check_breakpoint_line(mrb, dbg, file, line);
+    if (bpno > 0) return bpno;
+  }
+  return 0;
+}
+
 static void
 mrb_code_fetch_hook(mrb_state *mrb, const mrb_irep *irep, const mrb_code *pc, mrb_value *regs)
 {
@@ -608,23 +624,16 @@ mrb_code_fetch_hook(mrb_state *mrb, const mrb_irep *irep, const mrb_code *pc, mr
     break;
 
   case DBG_RUN:
-    bpno = check_method_breakpoint(mrb, irep, pc, regs);
+    bpno = check_breakpoint_hit(mrb, dbg, irep, pc, file, line, regs);
     if (bpno > 0) {
       dbg->stopped_bpno = bpno;
       dbg->bm = BRK_BREAK;
       break;
     }
-    if (dbg->prvfile != file || dbg->prvline != line) {
-      bpno = mrb_debug_check_breakpoint_line(mrb, dbg, file, line);
-      if (bpno > 0) {
-        dbg->stopped_bpno = bpno;
-        dbg->bm = BRK_BREAK;
-        break;
-      }
-    }
     dbg->prvfile = file;
     dbg->prvline = line;
     return;
+
   case DBG_INIT:
     dbg->root_irep = irep;
     dbg->bm = BRK_INIT;
