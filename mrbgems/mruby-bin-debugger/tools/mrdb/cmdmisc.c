@@ -501,9 +501,7 @@ dbgcmd_quit(mrb_state *mrb, mrdb_state *mrdb)
   }
 
   if (mrdb->dbg->xm == DBG_QUIT) {
-    struct RClass *exc;
-    exc = mrb_define_class(mrb, "DebuggerExit", E_EXCEPTION);
-    mrb_raise(mrb, exc, "Exit mrdb");
+    raise_debugger_exception(mrb, "DebuggerExit", "Exit mrdb");
   }
   return DBGST_PROMPT;
 }
