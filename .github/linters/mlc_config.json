@@ -1,4 +1,11 @@
 {
+  "retryOn429": true,
+  "retryCount": 3,
+  "aliveStatusCodes": [
+    200,
+    206,
+    502
+  ],
   "ignorePatterns": [
     {
       "pattern": "^https://github.com/mruby/mruby/commit/"
