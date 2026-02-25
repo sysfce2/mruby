@@ -42,6 +42,7 @@ typedef struct mrb_gc {
   struct mrb_heap_page *heaps;     /* all heaps pages */
   struct mrb_heap_page *free_heaps;/* heaps for allocation */
   struct mrb_heap_page *sweeps;    /* page where sweep starts */
+  struct mrb_heap_region *regions;  /* contiguous heap regions */
   struct RBasic *gray_stack[MRB_GRAY_STACK_SIZE]; /* stack of gray objects */
   size_t gray_stack_top;           /* top index of gray stack */
   mrb_bool gray_overflow:1;        /* gray stack overflowed; needs heap rescan */
@@ -69,6 +70,7 @@ typedef struct mrb_gc {
 } mrb_gc;
 
 MRB_API mrb_bool mrb_object_dead_p(struct mrb_state *mrb, struct RBasic *object);
+MRB_API int mrb_gc_add_region(struct mrb_state *mrb, void *start, size_t size);
 
 #define MRB_GC_RED 7
 
