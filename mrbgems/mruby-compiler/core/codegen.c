@@ -4597,10 +4597,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
       }
       else {
         /* Variable not found - raise compile error like CRuby */
-        const char *name = mrb_sym_name_len(s->mrb, pat_pin->name, NULL);
-        char buf[256];
-        snprintf(buf, sizeof(buf), "%.200s: no such local variable", name);
-        codegen_error(s, buf);
+        codegen_error(s, "no such local variable for pin operator");
       }
     }
     break;
