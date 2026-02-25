@@ -1902,11 +1902,14 @@ RETRY_TRY_BLOCK:
           mrb_value *ptr;
 
           /* Single ARY_EMBED_P check instead of two */
+#ifndef MRB_ARY_NO_EMBED
           if (ARY_EMBED_P(ary)) {
             len = ARY_EMBED_LEN(ary);
             ptr = ary->as.ary;
           }
-          else {
+          else
+#endif
+          {
             len = ary->as.heap.len;
             ptr = ary->as.heap.ptr;
           }
@@ -1956,10 +1959,13 @@ RETRY_TRY_BLOCK:
       if (mrb_likely(tt == MRB_TT_ARRAY)) {
         struct RArray *ary = mrb_ary_ptr(recv);
         if (mrb_unlikely(ary->c != mrb->array_class)) goto getidx0_fallback;
+#ifndef MRB_ARY_NO_EMBED
         if (ARY_EMBED_P(ary)) {
           regs[a] = ARY_EMBED_LEN(ary) > 0 ? ary->as.ary[0] : mrb_nil_value();
         }
-        else {
+        else
+#endif
+        {
           regs[a] = ary->as.heap.len > 0 ? ary->as.heap.ptr[0] : mrb_nil_value();
         }
         NEXT;
