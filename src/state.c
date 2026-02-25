@@ -134,8 +134,10 @@ void
 mrb_irep_free(mrb_state *mrb, mrb_irep *irep)
 {
   int i;
+  mrb_bool consolidated;
 
   if (irep->flags & MRB_IREP_NO_FREE) return;
+  consolidated = (irep->flags & MRB_IREP_CONSOLIDATED) != 0;
   if (!(irep->flags & MRB_ISEQ_NO_FREE))
     mrb_free(mrb, (void*)irep->iseq);
   if (irep->pool) {
@@ -145,15 +147,15 @@ mrb_irep_free(mrb_state *mrb, mrb_irep *irep)
         mrb_free(mrb, (void*)irep->pool[i].u.str);
       }
     }
-    mrb_free(mrb, (void*)irep->pool);
+    if (!consolidated) mrb_free(mrb, (void*)irep->pool);
   }
-  mrb_free(mrb, (void*)irep->syms);
+  if (!consolidated) mrb_free(mrb, (void*)irep->syms);
   if (irep->reps) {
     for (i=0; i<irep->rlen; i++) {
       if (irep->reps[i])
         mrb_irep_decref(mrb, (mrb_irep*)irep->reps[i]);
     }
-    mrb_free(mrb, (void*)irep->reps);
+    if (!consolidated) mrb_free(mrb, (void*)irep->reps);
   }
   mrb_free(mrb, (void*)irep->lv);
   mrb_debug_info_free(mrb, irep->debug_info);
