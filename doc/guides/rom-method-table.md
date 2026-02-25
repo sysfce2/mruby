@@ -155,11 +155,11 @@ typedef struct mrb_mt_tbl {
 
 ### Flags
 
-| Flag             | Value    | Description                         |
-| ---------------- | -------- | ----------------------------------- |
-| `MRB_MT_FUNC`    | (1<<24)  | C function (auto-set by macro)      |
-| `MRB_MT_PUBLIC`  | 0        | Public visibility (default)         |
-| `MRB_MT_PRIVATE` | (1<<25)  | Private visibility (in entry param) |
+| Flag             | Value   | Description                         |
+| ---------------- | ------- | ----------------------------------- |
+| `MRB_MT_FUNC`    | (1<<24) | C function (auto-set by macro)      |
+| `MRB_MT_PUBLIC`  | 0       | Public visibility (default)         |
+| `MRB_MT_PRIVATE` | (1<<25) | Private visibility (in entry param) |
 
 The third parameter to `MRB_MT_ENTRY()` is an `MRB_ARGS_*()`
 expression optionally OR'd with `MRB_MT_PRIVATE`. The aspec value
