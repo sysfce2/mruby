@@ -239,6 +239,287 @@ iv_free(mrb_state *mrb, iv_tbl *t)
   mrb_free(mrb, t);
 }
 
+/*
+ * Object Shape (Hidden Class) structures.
+ *
+ * A shape describes the IV layout of an object: which syms are stored
+ * at which indices. Shapes form a tree rooted at the empty root shape.
+ * Each child adds one IV (its "edge" sym). Objects sharing the same
+ * set of IVs (assigned in the same order) share the same shape,
+ * eliminating per-object key storage.
+ *
+ * Only MRB_TT_OBJECT instances are shaped. RClass, RHash, etc. keep
+ * traditional iv_tbl.
+ */
+
+/* Maximum IV count before de-shaping to iv_tbl */
+#define MRB_SHAPE_MAX_IVS 16
+
+/* Shape descriptor -- shared across objects with same IV layout */
+typedef struct mrb_iv_shape {
+  struct mrb_iv_shape *parent;    /* parent shape (one fewer IV) */
+  struct mrb_iv_shape *children;  /* linked list of child shapes */
+  struct mrb_iv_shape *sibling;   /* next child of same parent */
+  mrb_sym edge;                   /* IV sym added from parent */
+  uint16_t count;                 /* number of IV slots */
+} mrb_iv_shape;
+
+/* Per-object shaped IV storage (allocated via struct hack) */
+typedef struct mrb_shaped_iv {
+  mrb_iv_shape *shape;
+  mrb_value values[1];  /* shape->count elements */
+} mrb_shaped_iv;
+
+/* Create the empty root shape */
+static mrb_iv_shape*
+shape_root(mrb_state *mrb)
+{
+  mrb_iv_shape *s = (mrb_iv_shape*)mrb_calloc(mrb, 1, sizeof(mrb_iv_shape));
+  return s;
+}
+
+/* Find a child shape with the given edge sym */
+static mrb_iv_shape*
+shape_find_child(mrb_iv_shape *shape, mrb_sym sym)
+{
+  mrb_iv_shape *c = shape->children;
+  while (c) {
+    if (c->edge == sym) return c;
+    c = c->sibling;
+  }
+  return NULL;
+}
+
+/* Find or create a child shape for adding sym */
+static mrb_iv_shape*
+shape_transition(mrb_state *mrb, mrb_iv_shape *shape, mrb_sym sym)
+{
+  mrb_iv_shape *child = shape_find_child(shape, sym);
+  if (child) return child;
+
+  /* create new child shape */
+  child = (mrb_iv_shape*)mrb_malloc(mrb, sizeof(mrb_iv_shape));
+  child->parent = shape;
+  child->children = NULL;
+  child->sibling = shape->children;
+  child->edge = sym;
+  child->count = shape->count + 1;
+  shape->children = child;
+  return child;
+}
+
+/*
+ * Look up sym in shape by walking the parent chain.
+ * Returns the value index (0-based), or -1 if not found.
+ */
+static int
+shape_lookup(mrb_iv_shape *shape, mrb_sym sym)
+{
+  mrb_iv_shape *s = shape;
+  while (s->count > 0) {
+    if (s->edge == sym) return s->count - 1;
+    s = s->parent;
+  }
+  return -1;
+}
+
+/* Recursively free all shapes in the tree */
+static void
+shape_free_tree(mrb_state *mrb, mrb_iv_shape *shape)
+{
+  mrb_iv_shape *c = shape->children;
+  while (c) {
+    mrb_iv_shape *next = c->sibling;
+    shape_free_tree(mrb, c);
+    c = next;
+  }
+  mrb_free(mrb, shape);
+}
+
+/* Allocate a mrb_shaped_iv with room for count values */
+static mrb_shaped_iv*
+shaped_iv_alloc(mrb_state *mrb, mrb_iv_shape *shape)
+{
+  size_t sz = offsetof(mrb_shaped_iv, values) +
+              sizeof(mrb_value) * shape->count;
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)mrb_malloc(mrb, sz);
+  siv->shape = shape;
+  return siv;
+}
+
+/* Convert a shaped object back to traditional iv_tbl (de-shape) */
+static void
+shaped_to_iv_tbl(mrb_state *mrb, struct RObject *obj)
+{
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)obj->iv;
+  iv_tbl *t = NULL;
+
+  if (siv) {
+    mrb_iv_shape *shape = siv->shape;
+
+    if (shape->count > 0) {
+      /* reconstruct keys from parent chain */
+      mrb_sym keys[MRB_SHAPE_MAX_IVS];
+      mrb_iv_shape *s = shape;
+      while (s->count > 0) {
+        keys[s->count - 1] = s->edge;
+        s = s->parent;
+      }
+
+      t = iv_new(mrb);
+      for (int i = 0; i < shape->count; i++) {
+        if (!mrb_undef_p(siv->values[i])) {
+          iv_put(mrb, t, keys[i], siv->values[i]);
+        }
+      }
+    }
+    mrb_free(mrb, siv);
+  }
+  obj->iv = t;
+  obj->flags &= ~MRB_FL_OBJ_SHAPED;
+}
+
+/* --- Shaped IV operations --- */
+
+static void
+shaped_iv_set(mrb_state *mrb, struct RObject *obj, mrb_sym sym, mrb_value v)
+{
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)obj->iv;
+  mrb_iv_shape *shape = siv ? siv->shape : mrb->root_shape;
+
+  /* check if sym already exists in current shape */
+  int idx = shape_lookup(shape, sym);
+  if (idx >= 0) {
+    siv->values[idx] = v;
+    return;
+  }
+
+  /* transition to new shape */
+  mrb_iv_shape *new_shape = shape_transition(mrb, shape, sym);
+
+  /* de-shape if too many IVs */
+  if (new_shape->count > MRB_SHAPE_MAX_IVS) {
+    shaped_to_iv_tbl(mrb, obj);
+    if (!obj->iv) {
+      obj->iv = iv_new(mrb);
+    }
+    iv_put(mrb, obj->iv, sym, v);
+    return;
+  }
+
+  /* allocate new shaped_iv with room for new shape */
+  mrb_shaped_iv *new_siv = shaped_iv_alloc(mrb, new_shape);
+
+  /* copy old values (they are a prefix) */
+  if (siv) {
+    memcpy(new_siv->values, siv->values,
+           sizeof(mrb_value) * shape->count);
+    mrb_free(mrb, siv);
+  }
+  /* new IV goes in the last slot */
+  new_siv->values[new_shape->count - 1] = v;
+
+  obj->iv = (iv_tbl*)new_siv;
+}
+
+static mrb_value
+shaped_iv_get(struct RObject *obj, mrb_sym sym)
+{
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)obj->iv;
+  if (!siv) return mrb_nil_value();
+  int idx = shape_lookup(siv->shape, sym);
+  if (idx >= 0 && !mrb_undef_p(siv->values[idx]))
+    return siv->values[idx];
+  return mrb_nil_value();
+}
+
+static mrb_bool
+shaped_iv_defined(struct RObject *obj, mrb_sym sym)
+{
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)obj->iv;
+  if (!siv) return FALSE;
+  int idx = shape_lookup(siv->shape, sym);
+  if (idx >= 0 && !mrb_undef_p(siv->values[idx]))
+    return TRUE;
+  return FALSE;
+}
+
+static void
+shaped_iv_foreach(mrb_state *mrb, struct RObject *obj,
+                  mrb_iv_foreach_func *func, void *p)
+{
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)obj->iv;
+  if (!siv) return;
+  mrb_iv_shape *shape = siv->shape;
+  if (shape->count == 0) return;
+
+  /* reconstruct keys from parent chain */
+  mrb_sym keys[MRB_SHAPE_MAX_IVS];
+  mrb_iv_shape *s = shape;
+  while (s->count > 0) {
+    keys[s->count - 1] = s->edge;
+    s = s->parent;
+  }
+
+  for (int i = 0; i < shape->count; i++) {
+    if (!mrb_undef_p(siv->values[i])) {
+      if ((*func)(mrb, keys[i], siv->values[i], p) != 0) return;
+    }
+  }
+}
+
+static size_t
+shaped_iv_mark(mrb_state *mrb, struct RObject *obj)
+{
+  mrb_shaped_iv *siv = (mrb_shaped_iv*)obj->iv;
+  if (!siv) return 0;
+  mrb_iv_shape *shape = siv->shape;
+  for (int i = 0; i < shape->count; i++) {
+    if (!mrb_undef_p(siv->values[i])) {
+      mrb_gc_mark_value(mrb, siv->values[i]);
+    }
+  }
+  return shape->count;
+}
+
+static void
+shaped_iv_free(mrb_state *mrb, struct RObject *obj)
+{
+  if (obj->iv) {
+    mrb_free(mrb, obj->iv);
+  }
+}
+
+static void
+shaped_iv_copy(mrb_state *mrb, struct RObject *dst, struct RObject *src)
+{
+  mrb_shaped_iv *ssiv = (mrb_shaped_iv*)src->iv;
+  if (!ssiv) {
+    dst->iv = NULL;
+    return;
+  }
+  mrb_iv_shape *shape = ssiv->shape;
+  mrb_shaped_iv *dsiv = shaped_iv_alloc(mrb, shape);
+  memcpy(dsiv->values, ssiv->values, sizeof(mrb_value) * shape->count);
+  dst->iv = (iv_tbl*)dsiv;
+}
+
+/* Public init/free for shape tree (called from state.c) */
+void
+mrb_init_shape(mrb_state *mrb)
+{
+  mrb->root_shape = shape_root(mrb);
+}
+
+void
+mrb_free_shape(mrb_state *mrb)
+{
+  if (mrb->root_shape) {
+    shape_free_tree(mrb, mrb->root_shape);
+    mrb->root_shape = NULL;
+  }
+}
+
 static int
 iv_mark_i(mrb_state *mrb, mrb_sym sym, mrb_value v, void *p)
 {
@@ -270,6 +551,9 @@ mrb_gc_free_gv(mrb_state *mrb)
 size_t
 mrb_gc_mark_iv(mrb_state *mrb, struct RObject *obj)
 {
+  if (MRB_OBJ_SHAPED_P(obj)) {
+    return shaped_iv_mark(mrb, obj);
+  }
   mark_tbl(mrb, obj->iv);
   return iv_size(mrb, obj->iv);
 }
@@ -277,6 +561,10 @@ mrb_gc_mark_iv(mrb_state *mrb, struct RObject *obj)
 void
 mrb_gc_free_iv(mrb_state *mrb, struct RObject *obj)
 {
+  if (MRB_OBJ_SHAPED_P(obj)) {
+    shaped_iv_free(mrb, obj);
+    return;
+  }
   if (obj->iv) {
     iv_free(mrb, obj->iv);
   }
@@ -331,8 +619,11 @@ class_iv_ptr(struct RClass *c)
 MRB_API mrb_value
 mrb_obj_iv_get(mrb_state *mrb, struct RObject *obj, mrb_sym sym)
 {
-  mrb_value v;
+  if (MRB_OBJ_SHAPED_P(obj)) {
+    return shaped_iv_get(obj, sym);
+  }
 
+  mrb_value v;
   if (obj->iv && iv_get(mrb, obj->iv, sym, &v))
     return v;
   return mrb_nil_value();
@@ -402,6 +693,11 @@ mrb_obj_iv_set_force(mrb_state *mrb, struct RObject *obj, mrb_sym sym, mrb_value
   if (namespace_p(obj->tt)) {
     assign_class_name(mrb, obj, sym, v);
   }
+  if (MRB_OBJ_SHAPED_P(obj)) {
+    shaped_iv_set(mrb, obj, sym, v);
+    mrb_field_write_barrier_value(mrb, (struct RBasic*)obj, v);
+    return;
+  }
   if (!obj->iv) {
     obj->iv = iv_new(mrb);
   }
@@ -447,6 +743,10 @@ MRB_API void
 mrb_iv_foreach(mrb_state *mrb, mrb_value obj, mrb_iv_foreach_func *func, void *p)
 {
   if (!obj_iv_p(obj)) return;
+  if (MRB_OBJ_SHAPED_P(mrb_obj_ptr(obj))) {
+    shaped_iv_foreach(mrb, mrb_obj_ptr(obj), func, p);
+    return;
+  }
   iv_foreach(mrb, mrb_obj_ptr(obj)->iv, func, p);
 }
 
@@ -492,9 +792,11 @@ mrb_iv_set(mrb_state *mrb, mrb_value obj, mrb_sym sym, mrb_value v)
 MRB_API mrb_bool
 mrb_obj_iv_defined(mrb_state *mrb, struct RObject *obj, mrb_sym sym)
 {
-  iv_tbl *t;
+  if (MRB_OBJ_SHAPED_P(obj)) {
+    return shaped_iv_defined(obj, sym);
+  }
 
-  t = obj->iv;
+  iv_tbl *t = obj->iv;
   if (t && iv_get(mrb, t, sym, NULL)) return TRUE;
   return FALSE;
 }
@@ -586,13 +888,55 @@ mrb_iv_copy(mrb_state *mrb, mrb_value dest, mrb_value src)
   struct RObject *d = mrb_obj_ptr(dest);
   struct RObject *s = mrb_obj_ptr(src);
 
-  if (d->iv) {
-    iv_free(mrb, d->iv);
-    d->iv = 0;
+  /* free dest's existing IVs */
+  if (MRB_OBJ_SHAPED_P(d)) {
+    shaped_iv_free(mrb, d);
+    d->iv = NULL;
   }
-  if (s->iv) {
-    mrb_write_barrier(mrb, (struct RBasic*)d);
-    d->iv = iv_copy(mrb, s->iv);
+  else if (d->iv) {
+    iv_free(mrb, d->iv);
+    d->iv = NULL;
+  }
+
+  if (MRB_OBJ_SHAPED_P(s) && MRB_OBJ_SHAPED_P(d)) {
+    /* both shaped: share shape, memcpy values */
+    if (s->iv) {
+      mrb_write_barrier(mrb, (struct RBasic*)d);
+      shaped_iv_copy(mrb, d, s);
+    }
+  }
+  else if (MRB_OBJ_SHAPED_P(s)) {
+    /* src shaped, dest unshaped: convert src to iv_tbl copy */
+    mrb_shaped_iv *ssiv = (mrb_shaped_iv*)s->iv;
+    if (ssiv) {
+      mrb_iv_shape *shape = ssiv->shape;
+      if (shape->count > 0) {
+        mrb_sym keys[MRB_SHAPE_MAX_IVS];
+        mrb_iv_shape *sh = shape;
+        while (sh->count > 0) {
+          keys[sh->count - 1] = sh->edge;
+          sh = sh->parent;
+        }
+        iv_tbl *t = iv_new(mrb);
+        for (int i = 0; i < shape->count; i++) {
+          if (!mrb_undef_p(ssiv->values[i])) {
+            iv_put(mrb, t, keys[i], ssiv->values[i]);
+          }
+        }
+        mrb_write_barrier(mrb, (struct RBasic*)d);
+        d->iv = t;
+      }
+    }
+  }
+  else {
+    /* both unshaped or dest shaped but src unshaped */
+    if (MRB_OBJ_SHAPED_P(d)) {
+      d->flags &= ~MRB_FL_OBJ_SHAPED;
+    }
+    if (s->iv) {
+      mrb_write_barrier(mrb, (struct RBasic*)d);
+      d->iv = iv_copy(mrb, s->iv);
+    }
   }
 }
 
@@ -614,10 +958,25 @@ mrb_iv_remove(mrb_state *mrb, mrb_value obj, mrb_sym sym)
 {
   if (obj_iv_p(obj)) {
     struct RObject *o = mrb_obj_ptr(obj);
+    mrb_check_frozen(mrb, o);
+
+    if (MRB_OBJ_SHAPED_P(o)) {
+      mrb_shaped_iv *siv = (mrb_shaped_iv*)o->iv;
+      if (siv) {
+        int idx = shape_lookup(siv->shape, sym);
+        if (idx >= 0 && !mrb_undef_p(siv->values[idx])) {
+          mrb_value val = siv->values[idx];
+          /* de-shape, then remove the key */
+          shaped_to_iv_tbl(mrb, o);
+          iv_del(mrb, o->iv, sym, NULL);
+          return val;
+        }
+      }
+      return mrb_undef_value();
+    }
+
     iv_tbl *t = o->iv;
     mrb_value val;
-
-    mrb_check_frozen(mrb, o);
     if (iv_del(mrb, t, sym, &val)) {
       return val;
     }
@@ -661,7 +1020,13 @@ mrb_obj_instance_variables(mrb_state *mrb, mrb_value self)
   mrb_value ary = mrb_ary_new(mrb);
 
   if (obj_iv_p(self)) {
-    iv_foreach(mrb, mrb_obj_ptr(self)->iv, iv_i, &ary);
+    struct RObject *obj = mrb_obj_ptr(self);
+    if (MRB_OBJ_SHAPED_P(obj)) {
+      shaped_iv_foreach(mrb, obj, iv_i, &ary);
+    }
+    else {
+      iv_foreach(mrb, obj->iv, iv_i, &ary);
+    }
   }
   return ary;
 }
@@ -1458,7 +1823,14 @@ mrb_class_find_path(mrb_state *mrb, struct RClass *c)
 size_t
 mrb_obj_iv_tbl_memsize(mrb_value obj)
 {
-  iv_tbl *t = mrb_obj_ptr(obj)->iv;
+  struct RObject *o = mrb_obj_ptr(obj);
+  if (MRB_OBJ_SHAPED_P(o)) {
+    mrb_shaped_iv *siv = (mrb_shaped_iv*)o->iv;
+    if (!siv) return 0;
+    return offsetof(mrb_shaped_iv, values) +
+           sizeof(mrb_value) * siv->shape->count;
+  }
+  iv_tbl *t = o->iv;
   if (t == NULL) return 0;
   return sizeof(iv_tbl) + t->alloc*(sizeof(mrb_value)+sizeof(mrb_sym));
 }

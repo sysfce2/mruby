@@ -601,6 +601,9 @@ mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
   *p = RVALUE_zero;
   p->as.basic.tt = ttype;
   p->as.basic.c = cls;
+  if (ttype == MRB_TT_OBJECT) {
+    p->as.basic.flags |= MRB_FL_OBJ_SHAPED;
+  }
   paint_partial_white(gc, &p->as.basic);
   return &p->as.basic;
 }

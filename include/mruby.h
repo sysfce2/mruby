@@ -325,6 +325,8 @@ typedef struct mrb_state {
 
   struct mrb_mt_rom_list *rom_mt;  /* heap-allocated ROM wrappers (freed at close) */
 
+  struct mrb_iv_shape *root_shape; /* root of IV shape tree */
+
   void *ud; /* auxiliary data */
 
 #ifdef MRB_FIXED_STATE_ATEXIT_STACK

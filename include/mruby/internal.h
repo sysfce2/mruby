@@ -199,6 +199,10 @@ void mrb_gc_free_gv(mrb_state*);
 size_t mrb_gc_mark_iv(mrb_state*, struct RObject*);
 void mrb_gc_free_iv(mrb_state*, struct RObject*);
 
+/* IV shape tree */
+void mrb_init_shape(mrb_state*);
+void mrb_free_shape(mrb_state*);
+
 /* VM */
 #define MRB_CI_VISIBILITY(ci) MRB_FLAGS_GET((ci)->vis, 0, 2)
 #define MRB_CI_SET_VISIBILITY(ci, visi) MRB_FLAGS_SET((ci)->vis, 0, 2, visi)

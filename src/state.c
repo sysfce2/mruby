@@ -22,12 +22,16 @@ void mrb_gc_destroy(mrb_state*, mrb_gc *gc);
 
 int mrb_core_init_protect(mrb_state *mrb, void (*body)(mrb_state*, void*), void *opaque);
 
+void mrb_init_shape(mrb_state*);
+void mrb_free_shape(mrb_state*);
+
 static void
 init_gc_and_core(mrb_state *mrb, void *opaque)
 {
   static const struct mrb_context mrb_context_zero = { 0 };
 
   mrb_gc_init(mrb, &mrb->gc);
+  mrb_init_shape(mrb);
   mrb->c = (struct mrb_context*)mrb_malloc(mrb, sizeof(struct mrb_context));
   *mrb->c = mrb_context_zero;
   mrb->root_c = mrb->c;
@@ -187,6 +191,7 @@ mrb_close(mrb_state *mrb)
   /* free */
   mrb_gc_free_gv(mrb);
   mrb_gc_destroy(mrb, &mrb->gc);
+  mrb_free_shape(mrb);
   mrb_free_context(mrb, mrb->root_c);
   mrb_free_symtbl(mrb);
 

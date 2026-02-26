@@ -24,6 +24,11 @@ struct RBasic {
 #define MRB_OBJ_IS_FROZEN 1
 #define mrb_frozen_p(o) ((o)->frozen)
 
+/* Object shape flag -- when set, obj->iv is shaped, not iv_tbl* */
+/* Bit 5: avoids conflict with MRB_INSTANCE_TT_MASK (bits 0-4) */
+#define MRB_FL_OBJ_SHAPED (1 << 5)
+#define MRB_OBJ_SHAPED_P(o) ((o)->flags & MRB_FL_OBJ_SHAPED)
+
 struct RObject {
   MRB_OBJECT_HEADER;
   struct iv_tbl *iv;
