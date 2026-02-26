@@ -65,6 +65,7 @@ mruby-symbol-ext, mruby-range-ext, mruby-object-ext.
 - Lossless float encoding using rotation in word boxing ([b6148c8](https://github.com/mruby/mruby/commit/b6148c8))
 - Lossless rotation encoding for 32-bit float32 word boxing ([14a5cfb](https://github.com/mruby/mruby/commit/14a5cfb))
 - Consolidated irep allocation for .mrb loading ([74fb045](https://github.com/mruby/mruby/commit/74fb045))
+- Object shapes (hidden classes) for `MRB_TT_OBJECT` IV storage, sharing key layouts across objects with the same instance variable assignment order ([8d10056](https://github.com/mruby/mruby/commit/8d10056))
 
 # Build & Configuration
 
