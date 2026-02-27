@@ -178,7 +178,7 @@ mrb_obj_id(mrb_value obj)
 #ifndef MRB_NO_FLOAT
 /*
  * Boxes a `mrb_float` into an `mrb_value` using word boxing.
- * - If `MRB_WORDBOX_NO_FLOAT_TRUNCATE` is defined, it allocates a new
+ * - If `MRB_WORDBOX_NO_INLINE_FLOAT` is defined, it allocates a new
  *   RFloat object on the heap.
  * - If `MRB_64BIT` and `MRB_USE_FLOAT32` are defined, it stores the float
  *   in the lower bits of the word, shifted and tagged.
@@ -187,7 +187,7 @@ mrb_obj_id(mrb_value obj)
  *   Floats outside the inline range are heap-allocated as RFloat.
  */
 
-#if !defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE) && \
+#if !defined(MRB_WORDBOX_NO_INLINE_FLOAT) && \
     (!defined(MRB_USE_FLOAT32) || !defined(MRB_64BIT))
 /*
  * Rotation-based float encoding (shared between 64-bit float64 and
@@ -286,7 +286,7 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
 {
   union mrb_value_ v;
 
-#ifdef MRB_WORDBOX_NO_FLOAT_TRUNCATE
+#ifdef MRB_WORDBOX_NO_INLINE_FLOAT
   v.p = mrb_obj_alloc(mrb, MRB_TT_FLOAT, mrb->float_class);
   mrb_rfloat_set(v.fp, f);
   v.bp->frozen = 1;
@@ -366,7 +366,7 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
 }
 
 
-#ifndef MRB_WORDBOX_NO_FLOAT_TRUNCATE
+#ifndef MRB_WORDBOX_NO_INLINE_FLOAT
 /*
  * Unboxes an `mrb_value` to an `mrb_float`.
  * - 64-bit + float32: right-shift by 2 to retrieve the float.

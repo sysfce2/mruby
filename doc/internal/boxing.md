@@ -26,8 +26,8 @@ The Word boxing packing bit patterns are like following:
 | undef  | `00000000 00000000 00000000 00010100` |
 | symbol | `xxxxxxxx xxxxxxxx xxxxxxxx xxxxxx10` |
 
-On 64-bit platforms (unless `MRB_WORDBOX_NO_FLOAT_TRUNCATE`), float values are also packed in the `mrb_value`. In that case, we drop least significant 2 bits from mantissa.
-If you need full precision for floating-point numbers, define `MRB_WORDBOX_NO_FLOAT_TRUNCATE`.
+On 64-bit platforms (unless `MRB_WORDBOX_NO_INLINE_FLOAT`), float values are also packed in the `mrb_value` using rotation encoding (lossless for exponents in range).
+To disable inline float encoding and heap-allocate all floats, define `MRB_WORDBOX_NO_INLINE_FLOAT`.
 
 ## NaN Boxing
 
