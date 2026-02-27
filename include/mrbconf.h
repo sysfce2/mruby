@@ -86,6 +86,13 @@
 # endif
 #endif
 
+/* MRB_INT64 on 32-bit with word/NaN boxing causes alignment issues
+   for heap-allocated RInteger (int64_t needs 8-byte alignment but
+   GC heap slots may not guarantee it); use MRB_NO_BOXING instead */
+#if defined(MRB_INT64) && defined(MRB_32BIT) && !defined(MRB_NO_BOXING)
+#error "MRB_INT64 on 32-bit requires MRB_NO_BOXING"
+#endif
+
 /* call malloc_trim(0) from mrb_full_gc() */
 //#define MRB_USE_MALLOC_TRIM
 
