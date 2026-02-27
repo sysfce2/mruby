@@ -25,9 +25,11 @@ struct RBasic {
 #define mrb_frozen_p(o) ((o)->frozen)
 
 /* Object shape flag -- when set, obj->iv is shaped, not iv_tbl* */
-/* Bit 5: avoids conflict with MRB_INSTANCE_TT_MASK (bits 0-4) */
+/* Bit 5: avoids conflict with MRB_INSTANCE_TT_MASK (bits 0-4);
+   but conflicts with MRB_HASH_AR_EA_N_USED on 32-bit, so the
+   predicate must also check tt to avoid false positives */
 #define MRB_FL_OBJ_SHAPED (1 << 5)
-#define MRB_OBJ_SHAPED_P(o) ((o)->flags & MRB_FL_OBJ_SHAPED)
+#define MRB_OBJ_SHAPED_P(o) ((o)->tt == MRB_TT_OBJECT && ((o)->flags & MRB_FL_OBJ_SHAPED))
 
 struct RObject {
   MRB_OBJECT_HEADER;
