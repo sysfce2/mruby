@@ -3997,7 +3997,7 @@ init_copy(mrb_state *mrb, mrb_value dest, mrb_value obj)
     case MRB_TT_FLOAT:
       {
         struct RFloat *f = (struct RFloat*)mrb_obj_ptr(dest);
-        f->f = mrb_float(obj);
+        mrb_rfloat_set(f, mrb_float(obj));
       }
       break;
 #endif

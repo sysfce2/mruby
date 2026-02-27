@@ -288,7 +288,7 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
 
 #ifdef MRB_WORDBOX_NO_FLOAT_TRUNCATE
   v.p = mrb_obj_alloc(mrb, MRB_TT_FLOAT, mrb->float_class);
-  v.fp->f = f;
+  mrb_rfloat_set(v.fp, f);
   v.bp->frozen = 1;
 #elif defined(MRB_64BIT) && defined(MRB_USE_FLOAT32)
   v.w = 0;
@@ -323,7 +323,7 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
     else {
     float_heap:
       v.p = mrb_obj_alloc(mrb, MRB_TT_FLOAT, mrb->float_class);
-      v.fp->f = f;
+      mrb_rfloat_set(v.fp, f);
       v.bp->frozen = 1;
     }
   }
@@ -357,7 +357,7 @@ mrb_word_boxing_float_value(mrb_state *mrb, mrb_float f)
     else {
     float_heap:
       v.p = mrb_obj_alloc(mrb, MRB_TT_FLOAT, mrb->float_class);
-      v.fp->f = f;
+      mrb_rfloat_set(v.fp, f);
       v.bp->frozen = 1;
     }
   }
@@ -399,7 +399,7 @@ mrb_word_boxing_value_float(mrb_value v)
   else {
     union mrb_value_ u;
     u.value = v;
-    return u.fp->f;
+    return mrb_rfloat_value(u.fp);
   }
 #else
   /* 32-bit + float32: rotation decoding */
@@ -420,7 +420,7 @@ mrb_word_boxing_value_float(mrb_value v)
   else {
     union mrb_value_ u;
     u.value = v;
-    return u.fp->f;
+    return mrb_rfloat_value(u.fp);
   }
 #endif
 }

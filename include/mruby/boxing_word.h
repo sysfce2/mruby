@@ -14,8 +14,37 @@
 #ifndef MRB_NO_FLOAT
 struct RFloat {
   MRB_OBJECT_HEADER;
+#ifdef MRB_WORDBOX_NO_FLOAT_TRUNCATE
+  /* avoid 8-byte alignment on 32-bit; use memcpy-based accessors */
+  char f[sizeof(mrb_float)];
+#else
   mrb_float f;
+#endif
 };
+
+#include <string.h>
+
+static inline mrb_float
+mrb_rfloat_value(const struct RFloat *p)
+{
+#ifdef MRB_WORDBOX_NO_FLOAT_TRUNCATE
+  mrb_float f;
+  memcpy(&f, p->f, sizeof(mrb_float));
+  return f;
+#else
+  return p->f;
+#endif
+}
+
+static inline void
+mrb_rfloat_set(struct RFloat *p, mrb_float f)
+{
+#ifdef MRB_WORDBOX_NO_FLOAT_TRUNCATE
+  memcpy(p->f, &f, sizeof(mrb_float));
+#else
+  p->f = f;
+#endif
+}
 #endif
 
 struct RInteger {
@@ -155,7 +184,7 @@ MRB_API mrb_value mrb_boxing_int_value(struct mrb_state*, mrb_int);
 MRB_API mrb_float mrb_word_boxing_value_float(mrb_value v);
 #define mrb_float(o) mrb_word_boxing_value_float(o)
 #else
-#define mrb_float(o) mrb_val_union(o).fp->f
+#define mrb_float(o) mrb_rfloat_value(mrb_val_union(o).fp)
 #endif
 #endif
 #define mrb_fixnum(o)  (mrb_int)(((intptr_t)(o).w) >> WORDBOX_FIXNUM_SHIFT)
