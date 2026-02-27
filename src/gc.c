@@ -140,7 +140,7 @@ struct RVALUE {
 #if defined(MRB_WORD_BOXING) || (defined(MRB_NAN_BOXING) && defined(MRB_INT64))
     struct RInteger integer;
 #endif
-#if defined(MRB_WORD_BOXING) && !defined(MRB_NO_FLOAT) && defined(MRB_WORDBOX_NO_FLOAT_TRUNCATE)
+#if defined(MRB_WORD_BOXING) && !defined(MRB_NO_FLOAT) && defined(MRB_WORDBOX_NO_INLINE_FLOAT)
     struct RFloat flt;
 #endif
     struct RString string;
